@@ -1,0 +1,24 @@
+[package]
+edition = "2021"
+name = "rp2350-ble"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+embassy-executor = { version = "0.7.0", git = "https://github.com/embassy-rs/embassy", features = ["task-arena-size-98304", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-time = { version = "0.4.0", git = "https://github.com/embassy-rs/embassy", features = ["defmt", "defmt-timestamp-uptime"] }
+embassy-rp = { version = "0.3.0", git = "https://github.com/embassy-rs/embassy", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp235xa", "binary-info"] }
+cyw43 = { version = "0.3.0", git = "https://github.com/embassy-rs/embassy", features = ["defmt", "firmware-logs"] }
+cyw43-pio = { version = "0.3.0", git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
+defmt = "0.3"
+defmt-rtt = "0.4"
+cortex-m-rt = "0.7.0"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+static_cell = "2.1"
+
+[profile.release]
+debug = 2
+
+[profile.dev]
+lto = true
+opt-level = "z"
