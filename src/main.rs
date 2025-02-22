@@ -4,13 +4,13 @@
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_rp::peripherals::{DMA_CH0, PIO0};
-use embassy_rp::pio::{InterruptHandler, Pio};
-use embassy_rp::{bind_interrupts, gpio};
+use embassy_rp::peripherals::{DMA_CH0, PIO0, UART1};
+use embassy_rp::pio::{self, Pio};
+use embassy_rp::{bind_interrupts, gpio, uart};
 use embassy_time::{Duration, Timer};
 use gpio::{Level, Output};
 use static_cell::StaticCell;
-use {defmt_rtt as _, panic_probe as _};
+use {defmt_serial as _, panic_probe as _};
 
 // Program metadata for `picotool info`.
 // This isn't needed, but it's recomended to have these minimal entries.
@@ -25,8 +25,10 @@ pub static PICOTOOL_ENTRIES: [embassy_rp::binary_info::EntryAddr; 4] = [
     embassy_rp::binary_info::rp_program_build_attribute!(),
 ];
 
+static UART: StaticCell<uart::Uart<'static, UART1, uart::Blocking>> = StaticCell::new();
+
 bind_interrupts!(struct Irqs {
-    PIO0_IRQ_0 => InterruptHandler<PIO0>;
+    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
 });
 
 #[embassy_executor::task]
@@ -65,6 +67,15 @@ async fn main(spawner: Spawner) {
     control
         .set_power_management(cyw43::PowerManagementMode::PowerSave)
         .await;
+
+    let uart1 = UART.init(uart::Uart::new_blocking(
+        p.UART1,
+        p.PIN_4, // tx, blue, goes to rx
+        p.PIN_5, // rx, white, goes to tx
+        uart::Config::default(),
+    ));
+
+    defmt_serial::defmt_serial(uart1);
 
     let delay = Duration::from_secs(1);
     loop {

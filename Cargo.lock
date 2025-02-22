@@ -327,6 +327,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "defmt-serial"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f58b953e44512ad9e2a5cbd0924d975619e84d017e7f77eb0c94955f73d19813"
+dependencies = [
+ "critical-section",
+ "defmt",
+ "embedded-io",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1204,6 +1215,7 @@ dependencies = [
  "cyw43-pio",
  "defmt",
  "defmt-rtt",
+ "defmt-serial",
  "embassy-executor",
  "embassy-rp",
  "embassy-time",

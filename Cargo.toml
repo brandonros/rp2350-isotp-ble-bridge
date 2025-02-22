@@ -15,6 +15,7 @@ defmt-rtt = "0.4"
 cortex-m-rt = "0.7.0"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 static_cell = "2.1"
+defmt-serial = "0.10.0"
 
 [profile.release]
 debug = 2
