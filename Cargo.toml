@@ -5,19 +5,38 @@ version = "0.1.0"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-embassy-executor = { version = "0.7.0", git = "https://github.com/embassy-rs/embassy", features = ["task-arena-size-98304", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
-embassy-time = { version = "0.4.0", git = "https://github.com/embassy-rs/embassy", features = ["defmt", "defmt-timestamp-uptime"] }
-embassy-rp = { version = "0.3.0", git = "https://github.com/embassy-rs/embassy", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp235xa", "binary-info"] }
-embassy-futures = { version = "0.1.1", git = "https://github.com/embassy-rs/embassy" }
-cyw43 = { version = "0.3.0", git = "https://github.com/embassy-rs/embassy", features = ["defmt", "firmware-logs", "bluetooth"] }
-cyw43-pio = { version = "0.3.0", git = "https://github.com/embassy-rs/embassy", features = ["defmt"] }
-bt-hci = { version = "0.2.1", default-features = false, features = ["defmt"] }
+# embassy
+embassy-futures = "0.1.1"
+embassy-sync = "0.6.2"
+embassy-executor = { version = "*", features = ["task-arena-size-98304", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-time = { version = "*", features = ["defmt", "defmt-timestamp-uptime"] }
+# platform
+embassy-rp = { version = "*", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp235xa", "binary-info"] }
+cortex-m-rt = "0.7.0"
+cyw43 = { version = "*", features = ["defmt", "firmware-logs", "bluetooth"] }
+cyw43-pio = { version = "*", features = ["defmt"] }
+# bluetooth
+bt-hci = { version = "*", features = ["embassy-time", "uuid", "defmt"] }
+trouble-host = { version = "*", features = ["defmt"] }
+# logging
 defmt = "0.3"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 defmt-serial = "0.10.0"
-cortex-m-rt = "0.7.0"
+# static
 static_cell = "2.1"
-trouble-example-apps= { path = "../trouble/examples/apps", features = ["defmt"] }
+
+[patch.crates-io]
+embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
+cyw43 = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
+cyw43-pio = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
+bt-hci = { git = "https://github.com/embassy-rs/bt-hci", rev = "21ba1ce" }
+trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "b6694cf" }
+
+[features]
+default = ["defmt"]
+defmt = ["embassy-time/defmt", "embassy-rp/defmt", "cyw43/defmt", "bt-hci/defmt", "trouble-host/defmt", "panic-probe/print-defmt"]
 
 [profile.release]
 debug = 2
@@ -25,7 +44,3 @@ debug = 2
 [profile.dev]
 lto = true
 opt-level = "z"
-
-[patch.crates-io]
-embassy-rp = { git = "https://github.com/embassy-rs/embassy" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy" }

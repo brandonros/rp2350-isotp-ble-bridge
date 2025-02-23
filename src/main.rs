@@ -1,38 +1,38 @@
 #![no_std]
 #![no_main]
 
+mod ble_bas_peripheral;
+
 use bt_hci::controller::ExternalController;
+use cyw43::bluetooth::BtDriver;
 use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
-use defmt::*;
+use defmt::unwrap;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, PIO0, UART1};
 use embassy_rp::pio::{self, Pio};
 use embassy_rp::uart::{self};
+use embassy_time::{Duration, Timer};
 use static_cell::StaticCell;
-use trouble_example_apps::ble_bas_peripheral;
 use {defmt_serial as _, panic_probe as _};
 
 // Program metadata for `picotool info`.
-// This isn't needed, but it's recomended to have these minimal entries.
 #[link_section = ".bi_entries"]
 #[used]
 pub static PICOTOOL_ENTRIES: [embassy_rp::binary_info::EntryAddr; 4] = [
-    embassy_rp::binary_info::rp_program_name!(c"Blinky Example"),
-    embassy_rp::binary_info::rp_program_description!(
-        c"This example tests the RP Pico on board LED, connected to gpio 25"
-    ),
+    embassy_rp::binary_info::rp_program_name!(c"TrouBLE"),
+    embassy_rp::binary_info::rp_program_description!(c"BLE Peripheral"),
     embassy_rp::binary_info::rp_cargo_version!(),
     embassy_rp::binary_info::rp_program_build_attribute!(),
 ];
 
-static UART: StaticCell<uart::Uart<'static, UART1, uart::Blocking>> = StaticCell::new();
-
+// interrupt handlers
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
 });
 
+// cyw43 task
 #[embassy_executor::task]
 async fn cyw43_task(
     runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>,
@@ -40,10 +40,31 @@ async fn cyw43_task(
     runner.run().await
 }
 
+// blinky task
+#[embassy_executor::task]
+async fn blinky_task(control: &'static mut cyw43::Control<'static>) {
+    loop {
+        control.gpio_set(0, true).await;
+        Timer::after(Duration::from_millis(1000)).await;
+        control.gpio_set(0, false).await;
+        Timer::after(Duration::from_millis(1000)).await;
+    }
+}
+
+// ble task
+#[embassy_executor::task]
+async fn ble_task(bt_device: BtDriver<'static>) {
+    let controller: ExternalController<BtDriver<'static>, 10> = ExternalController::new(bt_device);
+    ble_bas_peripheral::run::<_, 128>(controller).await;
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    // init peripherals
     let p = embassy_rp::init(Default::default());
 
+    // init uart
+    static UART: StaticCell<uart::Uart<'static, UART1, uart::Blocking>> = StaticCell::new();
     let uart1 = UART.init(uart::Uart::new_blocking(
         p.UART1,
         p.PIN_4, // tx, blue, goes to rx
@@ -51,12 +72,13 @@ async fn main(spawner: Spawner) {
         uart::Config::default(),
     ));
 
+    // init defmt serial
     defmt_serial::defmt_serial(uart1);
 
+    // init cyw43
     let fw = include_bytes!("../cyw43-firmware/43439A0.bin");
     let clm = include_bytes!("../cyw43-firmware/43439A0_clm.bin");
     let btfw = include_bytes!("../cyw43-firmware/43439A0_btfw.bin");
-
     let pwr = Output::new(p.PIN_23, Level::Low);
     let cs = Output::new(p.PIN_25, Level::High);
     let mut pio = Pio::new(p.PIO0, Irqs);
@@ -70,7 +92,6 @@ async fn main(spawner: Spawner) {
         p.PIN_29,
         p.DMA_CH0,
     );
-
     static STATE: StaticCell<cyw43::State> = StaticCell::new();
     let state = STATE.init(cyw43::State::new());
     let (_net_device, bt_device, mut control, runner) =
@@ -78,7 +99,11 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(cyw43_task(runner)));
     control.init(clm).await;
 
-    let controller: ExternalController<_, 10> = ExternalController::new(bt_device);
+    // init blinky task
+    static CONTROL: StaticCell<cyw43::Control<'static>> = StaticCell::new();
+    let control = CONTROL.init(control);
+    unwrap!(spawner.spawn(blinky_task(control)));
 
-    ble_bas_peripheral::run::<_, 128>(controller).await;
+    // init ble peripheral
+    unwrap!(spawner.spawn(ble_task(bt_device)));
 }
