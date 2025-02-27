@@ -24,6 +24,10 @@ panic-probe = { version = "0.3", features = ["print-defmt"] }
 defmt-serial = "0.10.0"
 # static
 static_cell = "2.1"
+# atomic
+portable-atomic = "1.11.0"
+# can2040
+can2040_rs = { path = "../can2040_rs" }
 
 [patch.crates-io]
 embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
