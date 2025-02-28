@@ -2,7 +2,7 @@ use defmt::{info, warn};
 use embassy_futures::join::join;
 use trouble_host::prelude::*;
 
-use crate::ble_protocol;
+use crate::{ble_protocol, isotp_manager};
 
 /// Device name
 const DEVICE_NAME: &str = "BLE_TO_ISOTP";
@@ -64,10 +64,12 @@ where
     }))
     .unwrap();
 
+    let isotp_manager = isotp_manager::IsoTpManager::new();
+
     let _ = join(ble_task(runner), async {
         loop {
             match advertise(DEVICE_NAME, &mut peripheral).await {
-                Ok(conn) => match gatt_events_task(&server, &conn).await {
+                Ok(conn) => match gatt_events_task(&server, &conn, &isotp_manager).await {
                     Ok(_) => {}
                     Err(e) => {
                         #[cfg(feature = "defmt")]
@@ -87,20 +89,6 @@ where
 }
 
 /// This is a background task that is required to run forever alongside any other BLE tasks.
-///
-/// ## Alternative
-///
-/// If you didn't require this to be generic for your application, you could statically spawn this with i.e.
-///
-/// ```rust,ignore
-///
-/// #[embassy_executor::task]
-/// async fn ble_task(mut runner: Runner<'static, SoftdeviceController<'static>>) {
-///     runner.run().await;
-/// }
-///
-/// spawner.must_spawn(ble_task(runner));
-/// ```
 async fn ble_task<C: Controller>(mut runner: Runner<'_, C>) {
     loop {
         if let Err(e) = runner.run().await {
@@ -111,7 +99,7 @@ async fn ble_task<C: Controller>(mut runner: Runner<'_, C>) {
     }
 }
 
-async fn send_response(
+async fn update_response_characteristic(
     server: &Server<'_>,
     conn: &Connection<'_>,
     response_data: &heapless::Vec<u8, 512>,
@@ -133,7 +121,11 @@ async fn send_response(
 ///
 /// This function will handle the GATT events and process them.
 /// This is how we interact with read and write requests.
-async fn gatt_events_task(server: &Server<'_>, conn: &Connection<'_>) -> Result<(), Error> {
+async fn gatt_events_task(
+    server: &Server<'_>,
+    conn: &Connection<'_>,
+    isotp_manager: &isotp_manager::IsoTpManager,
+) -> Result<(), Error> {
     loop {
         match conn.next().await {
             ConnectionEvent::Disconnected { reason } => {

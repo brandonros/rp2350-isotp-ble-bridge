@@ -3,6 +3,8 @@ use defmt::{debug, error, info};
 use embassy_time::{Duration, Timer};
 use heapless::Vec;
 
+use crate::can_manager;
+
 // ISO-15765 constants
 const SF_DL_MAX: usize = 7; // Single Frame max data length
 const FF_DL_MAX: usize = 4095; // First Frame max data length
@@ -29,18 +31,16 @@ pub struct IsotpHandler {
     tx_index: AtomicU8,
     st_min: AtomicU8,
     block_size: AtomicU8,
-    can_send: fn(u32, &[u8]) -> bool,
 }
 
 impl IsotpHandler {
-    pub fn new(can_send: fn(u32, &[u8]) -> bool) -> Self {
+    pub fn new() -> Self {
         Self {
             rx_buffer: Vec::new(),
             tx_buffer: Vec::new(),
             tx_index: AtomicU8::new(0),
             st_min: AtomicU8::new(DEFAULT_ST_MIN),
             block_size: AtomicU8::new(DEFAULT_BLOCK_SIZE),
-            can_send,
         }
     }
 
@@ -73,7 +73,7 @@ impl IsotpHandler {
             .extend_from_slice(&[SINGLE_FRAME | (data.len() as u8)])
             .unwrap();
         frame.extend_from_slice(data).unwrap();
-        (self.can_send)(id, &frame)
+        can_manager::send_message(id, &frame)
     }
 
     async fn send_multi_frame(&mut self, id: u32, data: &[u8]) -> bool {
@@ -85,7 +85,7 @@ impl IsotpHandler {
             .unwrap();
         frame.extend_from_slice(&data[0..6]).unwrap();
 
-        if !(self.can_send)(id, &frame) {
+        if !can_manager::send_message(id, &frame) {
             return false;
         }
 

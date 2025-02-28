@@ -3,7 +3,9 @@
 
 mod ble_protocol;
 mod ble_server;
+mod can_manager;
 mod isotp_handler;
+mod isotp_manager;
 
 use bt_hci::controller::ExternalController;
 use cyw43::bluetooth::BtDriver;
@@ -31,25 +33,11 @@ pub static PICOTOOL_ENTRIES: [embassy_rp::binary_info::EntryAddr; 4] = [
     embassy_rp::binary_info::rp_program_build_attribute!(),
 ];
 
-static CAN_INSTANCE: AtomicPtr<can2040_rs::Can2040> = AtomicPtr::new(core::ptr::null_mut());
-
 // interrupt handlers
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
-    PIO2_IRQ_0 => CanInterruptHandler;
+    PIO2_IRQ_0 => can_manager::CanInterruptHandler;
 });
-
-struct CanInterruptHandler;
-impl embassy_rp::interrupt::typelevel::Handler<embassy_rp::interrupt::typelevel::PIO2_IRQ_0>
-    for CanInterruptHandler
-{
-    unsafe fn on_interrupt() {
-        let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
-        if !can_ptr.is_null() {
-            (*can_ptr).handle_interrupt();
-        }
-    }
-}
 
 // cyw43 task
 #[embassy_executor::task]
@@ -107,18 +95,10 @@ async fn can_task() {
     let mut ticker = embassy_time::Ticker::every(Duration::from_millis(1000));
 
     loop {
-        // Load the pointer once per iteration
-        let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
+        can_manager::send_message(0x7e5, &[0x02, 0x3e, 0x00, 0x55, 0x55, 0x55, 0x55, 0x55]);
 
-        if !can_ptr.is_null() {
-            can_send_message(
-                can_ptr,
-                0x7e5,
-                &[0x02, 0x3e, 0x00, 0x55, 0x55, 0x55, 0x55, 0x55],
-            );
-
-            // Get statistics to help with debugging
-            let stats = unsafe { (*can_ptr).get_statistics() };
+        // Get statistics to help with debugging
+        if let Some(stats) = can_manager::get_statistics() {
             info!(
                 "CAN stats - TX attempts: {}, TX successful: {}, RX: {}, Parse errors: {}",
                 stats.tx_attempt, stats.tx_total, stats.rx_total, stats.parse_error
@@ -222,7 +202,7 @@ async fn main(spawner: Spawner) {
     can.setup();
     can.set_callback(Some(can_callback));
     let can_ptr = &mut can as *mut _;
-    CAN_INSTANCE.store(can_ptr, Ordering::Release);
+    can_manager::init_instance(can_ptr);
     let gpio_rx = 10; // goes to transceiver rx, do not flip
     let gpio_tx = 11; // goes to transceiver tx, do not flip
     let sys_clock = embassy_rp::clocks::clk_sys_freq();
