@@ -1,8 +1,8 @@
 #![no_std]
 #![no_main]
 
-mod ble_bas_peripheral;
 mod ble_protocol;
+mod ble_server;
 mod isotp_handler;
 
 use bt_hci::controller::ExternalController;
@@ -25,8 +25,8 @@ use {defmt_serial as _, panic_probe as _};
 #[link_section = ".bi_entries"]
 #[used]
 pub static PICOTOOL_ENTRIES: [embassy_rp::binary_info::EntryAddr; 4] = [
-    embassy_rp::binary_info::rp_program_name!(c"TrouBLE"),
-    embassy_rp::binary_info::rp_program_description!(c"BLE Peripheral"),
+    embassy_rp::binary_info::rp_program_name!(c"BLE_TO_ISOTP"),
+    embassy_rp::binary_info::rp_program_description!(c"BLE to ISOTP bridge"),
     embassy_rp::binary_info::rp_cargo_version!(),
     embassy_rp::binary_info::rp_program_build_attribute!(),
 ];
@@ -136,7 +136,7 @@ async fn can_task() {
 #[embassy_executor::task]
 async fn ble_task(bt_device: BtDriver<'static>) {
     let controller: ExternalController<BtDriver<'static>, 10> = ExternalController::new(bt_device);
-    ble_bas_peripheral::run::<_, 128>(controller).await;
+    ble_server::run::<_, 128>(controller).await;
 }
 
 // CAN message callback

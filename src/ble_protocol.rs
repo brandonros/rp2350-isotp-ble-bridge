@@ -1,7 +1,9 @@
 use core::convert::TryFrom;
 
+use defmt::Format;
+
 /// Error type for message parsing
-#[derive(Debug)]
+#[derive(Debug, Format)]
 pub enum ParseError {
     InvalidCommand,
     BufferTooSmall,
@@ -12,11 +14,11 @@ pub enum ParseError {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandId {
-    UploadChunk = 0x02,
-    TriggerBleSend = 0x03,
+    UploadIsotpChunk = 0x02,
+    SendIsotpBuffer = 0x03,
     StartPeriodicMessage = 0x04,
     StopPeriodicMessage = 0x05,
-    ConfigureFilter = 0x06,
+    ConfigureIsotpFilter = 0x06,
 }
 
 impl TryFrom<u8> for CommandId {
@@ -24,11 +26,11 @@ impl TryFrom<u8> for CommandId {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0x02 => Ok(CommandId::UploadChunk),
-            0x03 => Ok(CommandId::TriggerBleSend),
+            0x02 => Ok(CommandId::UploadIsotpChunk),
+            0x03 => Ok(CommandId::SendIsotpBuffer),
             0x04 => Ok(CommandId::StartPeriodicMessage),
             0x05 => Ok(CommandId::StopPeriodicMessage),
-            0x06 => Ok(CommandId::ConfigureFilter),
+            0x06 => Ok(CommandId::ConfigureIsotpFilter),
             _ => Err(ParseError::InvalidCommand),
         }
     }
@@ -53,7 +55,7 @@ pub struct UploadChunkCommand<'a> {
 
 impl<'a> Command for UploadChunkCommand<'a> {
     fn command_id(&self) -> CommandId {
-        CommandId::UploadChunk
+        CommandId::UploadIsotpChunk
     }
 }
 
@@ -90,18 +92,18 @@ impl<'a> UploadChunkCommand<'a> {
 /// Trigger BLE Send Command (0x03)
 /// Used to trigger sending of accumulated chunks
 #[derive(Debug)]
-pub struct TriggerBleSendCommand {
+pub struct SendIsotpBufferCommand {
     // Total length of message to send
     pub total_length: u16,
 }
 
-impl Command for TriggerBleSendCommand {
+impl Command for SendIsotpBufferCommand {
     fn command_id(&self) -> CommandId {
-        CommandId::TriggerBleSend
+        CommandId::SendIsotpBuffer
     }
 }
 
-impl TriggerBleSendCommand {
+impl SendIsotpBufferCommand {
     /// Parse a trigger BLE send command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
         // Need 3 bytes: command(1) + length(2)
@@ -267,7 +269,7 @@ pub struct ConfigureFilterCommand<'a> {
 
 impl<'a> Command for ConfigureFilterCommand<'a> {
     fn command_id(&self) -> CommandId {
-        CommandId::ConfigureFilter
+        CommandId::ConfigureIsotpFilter
     }
 }
 
@@ -345,13 +347,13 @@ impl MessageParser {
         let command_id = CommandId::try_from(buffer[0])?;
 
         match command_id {
-            CommandId::UploadChunk => {
+            CommandId::UploadIsotpChunk => {
                 let command: UploadChunkCommand<'_> = UploadChunkCommand::parse(buffer)?;
-                Ok(ParsedMessage::UploadChunk(command))
+                Ok(ParsedMessage::UploadIsotpChunk(command))
             }
-            CommandId::TriggerBleSend => {
-                let command = TriggerBleSendCommand::parse(buffer)?;
-                Ok(ParsedMessage::TriggerBleSend(command))
+            CommandId::SendIsotpBuffer => {
+                let command = SendIsotpBufferCommand::parse(buffer)?;
+                Ok(ParsedMessage::SendIsotpBuffer(command))
             }
             CommandId::StartPeriodicMessage => {
                 let command = StartPeriodicMessageCommand::parse(buffer)?;
@@ -361,9 +363,9 @@ impl MessageParser {
                 let command = StopPeriodicMessageCommand::parse(buffer)?;
                 Ok(ParsedMessage::StopPeriodicMessage(command))
             }
-            CommandId::ConfigureFilter => {
+            CommandId::ConfigureIsotpFilter => {
                 let command = ConfigureFilterCommand::parse(buffer)?;
-                Ok(ParsedMessage::ConfigureFilter(command))
+                Ok(ParsedMessage::ConfigureIsotpFilter(command))
             }
         }
     }
@@ -372,11 +374,11 @@ impl MessageParser {
 /// Enum containing all possible parsed messages
 #[derive(Debug)]
 pub enum ParsedMessage<'a> {
-    UploadChunk(UploadChunkCommand<'a>),
-    TriggerBleSend(TriggerBleSendCommand),
+    UploadIsotpChunk(UploadChunkCommand<'a>),
+    SendIsotpBuffer(SendIsotpBufferCommand),
     StartPeriodicMessage(StartPeriodicMessageCommand<'a>),
     StopPeriodicMessage(StopPeriodicMessageCommand),
-    ConfigureFilter(ConfigureFilterCommand<'a>),
+    ConfigureIsotpFilter(ConfigureFilterCommand<'a>),
 }
 
 /// Simple message buffer for accumulating chunks

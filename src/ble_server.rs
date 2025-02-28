@@ -2,6 +2,8 @@ use defmt::{info, warn};
 use embassy_futures::join::join;
 use trouble_host::prelude::*;
 
+use crate::ble_protocol;
+
 /// Device name
 const DEVICE_NAME: &str = "BLE_TO_ISOTP";
 
@@ -109,6 +111,24 @@ async fn ble_task<C: Controller>(mut runner: Runner<'_, C>) {
     }
 }
 
+async fn send_response(
+    server: &Server<'_>,
+    conn: &Connection<'_>,
+    response_data: &heapless::Vec<u8, 512>,
+) {
+    match server
+        .spp_service
+        .response
+        .notify(server, conn, response_data)
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            warn!("[gatt] error notifying connection: {:?}", e);
+        }
+    }
+}
+
 /// Stream Events until the connection closes.
 ///
 /// This function will handle the GATT events and process them.
@@ -146,21 +166,28 @@ async fn gatt_events_task(server: &Server<'_>, conn: &Connection<'_>) -> Result<
                                         "[gatt] Write Event to Request Characteristic: {:?}",
                                         data
                                     );
-                                    // TODO: handle incoming request
-                                    // TODO: send response by updating response characteristic value
 
-                                    let mut response_data = heapless::Vec::new();
-                                    let _ = response_data.extend_from_slice(b"Hello, World!");
-
-                                    match server
-                                        .spp_service
-                                        .response
-                                        .notify(server, conn, &response_data)
-                                        .await
-                                    {
-                                        Ok(_) => {}
+                                    match ble_protocol::MessageParser::parse(data) {
+                                        Ok(parsed) => match parsed {
+                                            ble_protocol::ParsedMessage::UploadIsotpChunk(
+                                                upload_chunk_command,
+                                            ) => todo!(),
+                                            ble_protocol::ParsedMessage::SendIsotpBuffer(
+                                                send_isotp_buffer_command,
+                                            ) => todo!(),
+                                            ble_protocol::ParsedMessage::StartPeriodicMessage(
+                                                start_periodic_message_command,
+                                            ) => todo!(),
+                                            ble_protocol::ParsedMessage::StopPeriodicMessage(
+                                                stop_periodic_message_command,
+                                            ) => todo!(),
+                                            ble_protocol::ParsedMessage::ConfigureIsotpFilter(
+                                                configure_filter_command,
+                                            ) => todo!(),
+                                        },
                                         Err(e) => {
-                                            warn!("[gatt] error notifying connection: {:?}", e);
+                                            warn!("[gatt] Parse error: {:?}", e);
+                                            // TODO: Send error response
                                         }
                                     }
                                 } else {
