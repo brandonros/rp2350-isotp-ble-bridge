@@ -64,12 +64,12 @@ where
     }))
     .unwrap();
 
-    let isotp_manager = isotp_manager::IsoTpManager::new();
+    let mut isotp_manager = isotp_manager::IsoTpManager::new();
 
     let _ = join(ble_task(runner), async {
         loop {
             match advertise(DEVICE_NAME, &mut peripheral).await {
-                Ok(conn) => match gatt_events_task(&server, &conn, &isotp_manager).await {
+                Ok(conn) => match gatt_events_task(&server, &conn, &mut isotp_manager).await {
                     Ok(_) => {}
                     Err(e) => {
                         #[cfg(feature = "defmt")]
@@ -124,7 +124,7 @@ async fn update_response_characteristic(
 async fn gatt_events_task(
     server: &Server<'_>,
     conn: &Connection<'_>,
-    isotp_manager: &isotp_manager::IsoTpManager,
+    isotp_manager: &mut isotp_manager::IsoTpManager,
 ) -> Result<(), Error> {
     loop {
         match conn.next().await {
@@ -160,23 +160,14 @@ async fn gatt_events_task(
                                     );
 
                                     match ble_protocol::MessageParser::parse(data) {
-                                        Ok(parsed) => match parsed {
-                                            ble_protocol::ParsedMessage::UploadIsotpChunk(
-                                                upload_chunk_command,
-                                            ) => todo!(),
-                                            ble_protocol::ParsedMessage::SendIsotpBuffer(
-                                                send_isotp_buffer_command,
-                                            ) => todo!(),
-                                            ble_protocol::ParsedMessage::StartPeriodicMessage(
-                                                start_periodic_message_command,
-                                            ) => todo!(),
-                                            ble_protocol::ParsedMessage::StopPeriodicMessage(
-                                                stop_periodic_message_command,
-                                            ) => todo!(),
-                                            ble_protocol::ParsedMessage::ConfigureIsotpFilter(
-                                                configure_filter_command,
-                                            ) => todo!(),
-                                        },
+                                        Ok(parsed) => {
+                                            match isotp_manager.handle_message(&parsed).await {
+                                                Ok(_) => {}
+                                                Err(e) => {
+                                                    warn!("[gatt] error handling message: {:?}", e);
+                                                }
+                                            }
+                                        }
                                         Err(e) => {
                                             warn!("[gatt] Parse error: {:?}", e);
                                             // TODO: Send error response
