@@ -2,7 +2,7 @@ use crate::can_manager::CanMessage;
 use crate::channels::{ISOTP_BLE_CHANNEL, ISOTP_CAN_CHANNEL};
 use crate::isotp_handler::IsotpHandler;
 use crate::{ble_protocol::*, can_manager, led};
-use defmt::{error, info, Format};
+use defmt::{debug, error, info, Format};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 
@@ -21,10 +21,11 @@ pub enum ManagerError {
 }
 
 const MAX_HANDLERS: usize = 4;
+const MAX_TX_BUFFER_SIZE: usize = 4096;
 
 pub struct BleIsotpBridge {
     isotp_handlers: heapless::FnvIndexMap<u32, IsotpHandler, MAX_HANDLERS>,
-    isotp_tx_buffer: heapless::Vec<u8, 4096>,
+    isotp_tx_buffer: heapless::Vec<u8, MAX_TX_BUFFER_SIZE>,
 }
 
 impl BleIsotpBridge {
@@ -45,12 +46,24 @@ impl BleIsotpBridge {
                 let chunk_length = upload_chunk_command.chunk_length;
                 let chunk = upload_chunk_command.chunk.as_slice();
 
-                // check if offset is valid
-                if offset + chunk_length > self.isotp_tx_buffer.len() as u16 {
+                debug!(
+                    "[ble] UploadIsotpChunk: offset: {}, chunk_length: {}",
+                    offset, chunk_length
+                );
+
+                // check if offset + length would exceed max buffer size
+                if offset + chunk_length > MAX_TX_BUFFER_SIZE as u16 {
                     return Err(ManagerError::InvalidOffset);
                 }
 
-                // Copy chunk into tx buffer at offset
+                // Ensure buffer is large enough
+                let required_len = (offset as usize) + (chunk_length as usize);
+                match self.isotp_tx_buffer.resize(required_len, 0) {
+                    Ok(_) => (),
+                    Err(_) => return Err(ManagerError::InvalidOffset),
+                }
+
+                // Copy chunk into buffer
                 let start = offset as usize;
                 let end = start + chunk_length as usize;
                 self.isotp_tx_buffer[start..end].copy_from_slice(chunk);

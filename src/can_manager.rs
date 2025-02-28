@@ -89,6 +89,11 @@ pub async fn can_tx_channel_task() {
         // Wait for the next message
         let can_message = CAN_CHANNEL.receive().await;
 
+        info!(
+            "sending CAN message to {:x} {:02x}",
+            can_message.id, can_message.data
+        );
+
         // Load the pointer once
         let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
 
@@ -115,7 +120,6 @@ pub async fn can_tx_channel_task() {
         }
 
         // send
-        info!("sending CAN message");
         match unsafe { (*can_ptr).transmit(&mut msg) } {
             Ok(_) => debug!("CAN message sent successfully"),
             Err(e) => error!("Failed to send CAN message: {}", e),

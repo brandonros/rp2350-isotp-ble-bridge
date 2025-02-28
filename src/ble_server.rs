@@ -1,4 +1,4 @@
-use defmt::{info, warn};
+use defmt::{debug, info, warn};
 use embassy_futures::{join::join, select::select};
 use trouble_host::prelude::*;
 
@@ -33,7 +33,7 @@ struct Server {
 /// SPP service
 #[gatt_service(uuid = "0000abf0-0000-1000-8000-00805f9b34fb")]
 struct SppService {
-    #[characteristic(uuid = "0000abf3-0000-1000-8000-00805f9b34fb", write)]
+    #[characteristic(uuid = "0000abf3-0000-1000-8000-00805f9b34fb", write_without_response)]
     // client writes requests to the server
     request: heapless::Vec<u8, MAX_REQUEST_SIZE>,
 
@@ -150,13 +150,17 @@ async fn incoming_gatt_events_task(
     server: &Server<'_>,
     conn: &Connection<'_>,
 ) -> Result<(), Error> {
+    let request_handle = server.spp_service.request.handle;
+    let response_handle = server.spp_service.response.handle;
+    let response_cccd_handle = server.spp_service.response.cccd_handle.unwrap();
+
     loop {
         match conn.next().await {
             ConnectionEvent::Disconnected { reason } => {
                 info!("[gatt] disconnected: {:?}", reason);
                 break;
             }
-            ConnectionEvent::Gatt { data } => {
+            ConnectionEvent::Gatt { data: gatt_data } => {
                 // We can choose to handle event directly without an attribute table
                 // let req = data.request();
                 // ..
@@ -164,26 +168,28 @@ async fn incoming_gatt_events_task(
 
                 // But to simplify things, process it in the GATT server that handles
                 // the protocol details
-                match data.process(server).await {
+                debug!("[gatt] processing ConnectionEvent::Gatt");
+                match gatt_data.process(server).await {
                     // Server processing emits
-                    Ok(Some(event)) => {
-                        match &event {
-                            GattEvent::Read(event) => {
-                                if event.handle() == server.spp_service.response.handle {
+                    Ok(Some(gatt_event)) => {
+                        match &gatt_event {
+                            GattEvent::Read(read_event) => {
+                                if read_event.handle() == response_handle {
                                     info!("[gatt] Read Event to Response Characteristic");
                                 } else {
                                     warn!("[gatt] Read Event to Unknown Characteristic");
                                 }
                             }
-                            GattEvent::Write(event) => {
-                                if event.handle() == server.spp_service.request.handle {
-                                    let data = event.data();
+                            GattEvent::Write(write_event) => {
+                                let event_handle = write_event.handle();
+                                let event_data = write_event.data();
+                                if event_handle == request_handle {
                                     info!(
-                                        "[gatt] Write Event to Request Characteristic: {:?}",
-                                        data
+                                        "[gatt] Write Event to Request Characteristic: {:02x}",
+                                        event_data
                                     );
 
-                                    match ble_protocol::BleMessageParser::parse(data) {
+                                    match ble_protocol::BleMessageParser::parse(event_data) {
                                         Ok(parsed) => {
                                             ble_isotp_bridge::handle_ble_message(parsed).await;
                                         }
@@ -192,24 +198,31 @@ async fn incoming_gatt_events_task(
                                             // TODO: Send error response
                                         }
                                     }
+                                } else if event_handle == response_cccd_handle {
+                                    info!("[gatt] Write Event to Response CCCD: {:?}", event_data);
                                 } else {
-                                    warn!("[gatt] Write Event to Unknown Characteristic");
+                                    warn!(
+                                        "[gatt] Write Event to Unknown Characteristic {:?} {:02x}",
+                                        event_handle, event_data
+                                    );
+                                    warn!(
+                                        "[gatt] request handle: {:?} {:?}",
+                                        server.spp_service.request.handle,
+                                        server.spp_service.request.cccd_handle
+                                    );
+                                    warn!(
+                                        "[gatt] response handle: {:?} {:?}",
+                                        server.spp_service.response.handle,
+                                        server.spp_service.response.cccd_handle
+                                    );
                                 }
                             }
                         }
-
-                        // This step is also performed at drop(), but writing it explicitly is necessary
-                        // in order to ensure reply is sent.
-                        match event.accept() {
-                            Ok(reply) => {
-                                reply.send().await;
-                            }
-                            Err(e) => {
-                                warn!("[gatt] error sending response: {:?}", e);
-                            }
-                        }
                     }
-                    Ok(_) => {}
+                    Ok(None) => {
+                        // No event to process
+                        info!("[gatt] no event to process");
+                    }
                     Err(e) => {
                         warn!("[gatt] error processing event: {:?}", e);
                     }
