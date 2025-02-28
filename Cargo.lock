@@ -1325,6 +1325,7 @@ dependencies = [
  "can2040_rs",
  "cortex-m",
  "cortex-m-rt",
+ "critical-section",
  "cyw43",
  "cyw43-pio",
  "defmt",

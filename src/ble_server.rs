@@ -64,12 +64,10 @@ where
     }))
     .unwrap();
 
-    let mut isotp_manager = isotp_manager::IsoTpManager::new();
-
     let _ = join(ble_task(runner), async {
         loop {
             match advertise(DEVICE_NAME, &mut peripheral).await {
-                Ok(conn) => match gatt_events_task(&server, &conn, &mut isotp_manager).await {
+                Ok(conn) => match gatt_events_task(&server, &conn).await {
                     Ok(_) => {}
                     Err(e) => {
                         #[cfg(feature = "defmt")]
@@ -121,11 +119,7 @@ async fn update_response_characteristic(
 ///
 /// This function will handle the GATT events and process them.
 /// This is how we interact with read and write requests.
-async fn gatt_events_task(
-    server: &Server<'_>,
-    conn: &Connection<'_>,
-    isotp_manager: &mut isotp_manager::IsoTpManager,
-) -> Result<(), Error> {
+async fn gatt_events_task(server: &Server<'_>, conn: &Connection<'_>) -> Result<(), Error> {
     loop {
         match conn.next().await {
             ConnectionEvent::Disconnected { reason } => {
@@ -159,14 +153,9 @@ async fn gatt_events_task(
                                         data
                                     );
 
-                                    match ble_protocol::MessageParser::parse(data) {
+                                    match ble_protocol::BleMessageParser::parse(data) {
                                         Ok(parsed) => {
-                                            match isotp_manager.handle_message(&parsed).await {
-                                                Ok(_) => {}
-                                                Err(e) => {
-                                                    warn!("[gatt] error handling message: {:?}", e);
-                                                }
-                                            }
+                                            isotp_manager::handle_ble_message(parsed).await;
                                         }
                                         Err(e) => {
                                             warn!("[gatt] Parse error: {:?}", e);

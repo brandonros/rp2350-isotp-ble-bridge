@@ -1,6 +1,5 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 use defmt::{debug, error, info};
-use embassy_time::{Duration, Timer};
 use heapless::Vec;
 
 use crate::can_manager;
@@ -48,17 +47,17 @@ impl IsotpHandler {
         }
     }
 
-    pub fn handle_received_frame(&mut self, id: u32, data: &[u8]) {
+    pub async fn handle_received_frame(&mut self, id: u32, data: &[u8]) {
         if data.is_empty() {
             return;
         }
 
         let frame_type = data[0] >> 4;
         match frame_type {
-            0 => self.handle_single_frame(data),
-            1 => self.handle_first_frame(data),
-            2 => self.handle_consecutive_frame(data),
-            3 => self.handle_flow_control(data),
+            0 => self.handle_single_frame(id, data),
+            1 => self.handle_first_frame(id, data),
+            2 => self.handle_consecutive_frame(id, data),
+            3 => self.handle_flow_control(id, data),
             _ => error!("Unknown frame type: {}", frame_type),
         }
     }
@@ -103,7 +102,7 @@ impl IsotpHandler {
         true
     }
 
-    fn handle_single_frame(&mut self, data: &[u8]) {
+    fn handle_single_frame(&mut self, id: u32, data: &[u8]) {
         let length = data[0] & 0x0F;
         if length as usize > data.len() - 1 {
             error!("Invalid SF length");
@@ -118,15 +117,15 @@ impl IsotpHandler {
         info!("Received complete message: {:02x}", self.rx_buffer);
     }
 
-    fn handle_first_frame(&mut self, _data: &[u8]) {
+    fn handle_first_frame(&mut self, _id: u32, _data: &[u8]) {
         // TODO: Implement First Frame handling
     }
 
-    fn handle_consecutive_frame(&mut self, _data: &[u8]) {
+    fn handle_consecutive_frame(&mut self, _id: u32, _data: &[u8]) {
         // TODO: Implement Consecutive Frame handling
     }
 
-    fn handle_flow_control(&mut self, data: &[u8]) {
+    fn handle_flow_control(&mut self, _id: u32, data: &[u8]) {
         if data.len() < 3 {
             error!("Invalid FC frame length");
             return;

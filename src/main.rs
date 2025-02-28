@@ -125,7 +125,12 @@ async fn main(spawner: Spawner) {
         sys_clock, // sys_clock
         500_000,   // bitrate
     );
-    unwrap!(spawner.spawn(can_manager::can_task()));
+    unwrap!(spawner.spawn(can_manager::can_channel_task()));
+
+    // init isotp manager
+    unwrap!(spawner.spawn(isotp_manager::isotp_manager_ble_task()));
+    unwrap!(spawner.spawn(isotp_manager::isotp_manager_can_task()));
+    unwrap!(spawner.spawn(can_manager::can_isotp_dispatch_task()));
 
     // tasks will run in background
 }

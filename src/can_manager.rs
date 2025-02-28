@@ -4,15 +4,21 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use portable_atomic::{AtomicPtr, Ordering};
 
+#[derive(Debug)]
+pub struct CanMessage {
+    pub id: u32,
+    pub data: heapless::Vec<u8, 8>,
+}
+
 // Message type for the CAN task
 #[derive(Debug)]
-pub enum CanMessage {
-    Send { id: u32, data: heapless::Vec<u8, 8> },
+pub enum CanChannelMessage {
+    Send(CanMessage),
     // Add other message types as needed
 }
 
 // Channel for communicating with the CAN task
-pub static CAN_CHANNEL: Channel<CriticalSectionRawMutex, CanMessage, 16> = Channel::new();
+pub static CAN_CHANNEL: Channel<CriticalSectionRawMutex, CanChannelMessage, 16> = Channel::new();
 
 static CAN_INSTANCE: AtomicPtr<can2040_rs::Can2040> = AtomicPtr::new(core::ptr::null_mut());
 
@@ -27,14 +33,73 @@ impl interrupt::typelevel::Handler<interrupt::typelevel::PIO2_IRQ_0> for CanInte
     }
 }
 
+// Fixed-size ring buffer for incoming CAN messages
+const RING_BUFFER_SIZE: usize = 32;
+static CAN_RX_QUEUE: Channel<
+    CriticalSectionRawMutex,
+    (u32, heapless::Vec<u8, 8>),
+    RING_BUFFER_SIZE,
+> = Channel::new();
+
+// For 4-6 IDs, we can just use a small fixed array
+const MAX_FILTERS: usize = 8; // Round up to next power of 2 for good measure
+static mut FILTER_IDS: [u32; MAX_FILTERS] = [0; MAX_FILTERS];
+static mut FILTER_COUNT: u8 = 0;
+
+// Modified callback with direct comparison
+extern "C" fn can_callback(
+    _cd: *mut can2040_rs::can2040,
+    notify: u32,
+    msg: *mut can2040_rs::can2040_msg,
+) {
+    if notify == can2040_rs::notify::RX {
+        // Safety: msg is valid when notification is RX
+        let msg = unsafe { &*msg };
+
+        // Direct comparison against our small set of IDs
+        // Safety: We're only reading these values, and they're only modified during init
+        let count = unsafe { FILTER_COUNT };
+        let ids = unsafe { &FILTER_IDS };
+
+        // For such a small set, a simple loop is fastest
+        let mut found = false;
+        for i in 0..count as usize {
+            if msg.id == ids[i] {
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            return;
+        }
+
+        // Rest of the handler...
+        let mut data = heapless::Vec::new();
+        let frame_data = unsafe { msg.__bindgen_anon_1.data };
+        if data
+            .extend_from_slice(&frame_data[..(msg.dlc as usize)])
+            .is_ok()
+        {
+            let _ = CAN_RX_QUEUE.try_send((msg.id, data));
+        }
+    } else if notify == can2040_rs::notify::TX {
+        info!("CAN message sent");
+    } else if notify == can2040_rs::notify::ERROR {
+        info!("CAN error");
+    } else {
+        debug!("can_callback: unknown notify: {}", notify);
+    }
+}
+
 #[embassy_executor::task]
-pub async fn can_task() {
+pub async fn can_channel_task() {
     info!("CAN task started");
 
     loop {
         // Wait for the next message
         match CAN_CHANNEL.receive().await {
-            CanMessage::Send { id, data } => {
+            CanChannelMessage::Send(can_message) => {
                 // Load the pointer once
                 let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
 
@@ -45,9 +110,9 @@ pub async fn can_task() {
 
                 // build message
                 let mut msg = can2040_rs::can2040_msg::default();
-                msg.id = id;
-                msg.dlc = data.len() as u32;
-                for (i, &byte) in data.iter().enumerate() {
+                msg.id = can_message.id;
+                msg.dlc = can_message.data.len() as u32;
+                for (i, &byte) in can_message.data.iter().enumerate() {
                     unsafe {
                         msg.__bindgen_anon_1.data[i] = byte;
                     }
@@ -77,7 +142,9 @@ pub async fn send_message(id: u32, data: &[u8]) -> bool {
     match vec.extend_from_slice(data) {
         Ok(_) => {
             // Send message to CAN task
-            CAN_CHANNEL.send(CanMessage::Send { id, data: vec }).await;
+            CAN_CHANNEL
+                .send(CanChannelMessage::Send(CanMessage { id, data: vec }))
+                .await;
             true
         }
         Err(_) => {
@@ -91,35 +158,13 @@ pub fn init_instance(can: *mut can2040_rs::Can2040) {
     CAN_INSTANCE.store(can, Ordering::Release);
 }
 
+#[allow(dead_code)]
 pub fn get_statistics() -> Option<can2040_rs::can2040_stats> {
     let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
     if !can_ptr.is_null() {
         Some(unsafe { (*can_ptr).get_statistics() })
     } else {
         None
-    }
-}
-
-// Add these new functions and the callback:
-extern "C" fn can_callback(
-    _cd: *mut can2040_rs::can2040,
-    notify: u32,
-    msg: *mut can2040_rs::can2040_msg,
-) {
-    if notify == can2040_rs::notify::RX {
-        // Safety: msg is valid when notification is RX
-        let msg = unsafe { &*msg };
-        let data = unsafe { msg.__bindgen_anon_1.data };
-        info!(
-            "CAN message received: ID: {}, DLC: {} Data: {:02x}",
-            msg.id, msg.dlc, data
-        );
-    } else if notify == can2040_rs::notify::TX {
-        info!("CAN message sent");
-    } else if notify == can2040_rs::notify::ERROR {
-        info!("CAN error");
-    } else {
-        debug!("can_callback: unknown notify: {}", notify);
     }
 }
 
@@ -136,4 +181,31 @@ pub fn init_can(pio_num: u32, gpio_rx: u32, gpio_tx: u32, sys_clock: u32, bitrat
     let can_ptr = &mut can as *mut _;
     init_instance(can_ptr);
     can.start(sys_clock, bitrate, gpio_rx, gpio_tx);
+}
+
+// New task to process the ring buffer
+#[embassy_executor::task]
+pub async fn can_isotp_dispatch_task() {
+    use crate::isotp_manager;
+
+    loop {
+        let (id, data) = CAN_RX_QUEUE.receive().await;
+        isotp_manager::handle_can_frame(id, &data).await;
+    }
+}
+
+// Simplified filter registration
+pub fn register_isotp_filter(response_id: u32) -> bool {
+    critical_section::with(|_| {
+        // Safety: We're in a critical section
+        unsafe {
+            if FILTER_COUNT as usize >= MAX_FILTERS - 1 {
+                return false;
+            }
+
+            FILTER_IDS[FILTER_COUNT as usize] = response_id;
+            FILTER_COUNT += 1;
+        }
+        true
+    })
 }
