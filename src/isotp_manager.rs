@@ -1,3 +1,4 @@
+use crate::ble_server;
 use crate::can_manager::CanMessage;
 use crate::isotp_handler::IsotpHandler;
 use crate::{ble_protocol::*, can_manager};
@@ -193,9 +194,6 @@ pub async fn handle_ble_message(message: ParsedBleMessage) {
     ISOTP_BLE_CHANNEL.send(message).await;
 }
 
-pub async fn handle_can_frame(id: u32, data: &[u8]) {
-    let mut vec = heapless::Vec::new();
-    if vec.extend_from_slice(data).is_ok() {
-        ISOTP_CAN_CHANNEL.send(CanMessage { id, data: vec }).await;
-    }
+pub async fn handle_can_message(message: CanMessage) {
+    ISOTP_CAN_CHANNEL.send(message).await;
 }

@@ -1,7 +1,9 @@
 use core::sync::atomic::{AtomicU8, Ordering};
 use defmt::{debug, error, info};
 use heapless::Vec;
+use portable_atomic::AtomicU16;
 
+use crate::ble_server::{self, IsotpMessageReceived};
 use crate::can_manager;
 
 // ISO-15765 constants
@@ -32,6 +34,9 @@ pub struct IsotpHandler {
     tx_index: AtomicU8,
     st_min: AtomicU8,
     block_size: AtomicU8,
+    expected_sequence_number: AtomicU8,
+    remaining_block_size: AtomicU8,
+    expected_length: AtomicU16,
 }
 
 impl IsotpHandler {
@@ -44,6 +49,9 @@ impl IsotpHandler {
             tx_index: AtomicU8::new(0),
             st_min: AtomicU8::new(DEFAULT_ST_MIN),
             block_size: AtomicU8::new(DEFAULT_BLOCK_SIZE),
+            expected_sequence_number: AtomicU8::new(0),
+            remaining_block_size: AtomicU8::new(0),
+            expected_length: AtomicU16::new(0),
         }
     }
 
@@ -54,10 +62,10 @@ impl IsotpHandler {
 
         let frame_type = data[0] >> 4;
         match frame_type {
-            0 => self.handle_single_frame(id, data),
-            1 => self.handle_first_frame(id, data),
-            2 => self.handle_consecutive_frame(id, data),
-            3 => self.handle_flow_control(id, data),
+            0 => self.handle_single_frame(id, data).await,
+            1 => self.handle_first_frame(id, data).await,
+            2 => self.handle_consecutive_frame(id, data).await,
+            3 => self.handle_flow_control(id, data).await,
             _ => error!("Unknown frame type: {}", frame_type),
         }
     }
@@ -97,12 +105,56 @@ impl IsotpHandler {
         self.tx_buffer.extend_from_slice(&data[6..]).unwrap();
         self.tx_index.store(1, Ordering::Release);
 
-        // Wait for flow control and send consecutive frames
-        // TODO: Implement flow control handling and consecutive frame sending
+        let mut sequence_number: u8 = 1;
+        let mut data_index = 6;
+
+        while data_index < data.len() {
+            // Wait for ST_MIN
+            let st_min = self.st_min.load(Ordering::Acquire);
+            if st_min > 0 {
+                embassy_time::Timer::after(embassy_time::Duration::from_millis(st_min as u64))
+                    .await;
+            }
+
+            let mut frame = Vec::<u8, 8>::new();
+            frame
+                .push(CONSECUTIVE_FRAME | (sequence_number & 0x0F))
+                .unwrap();
+
+            let remaining = data.len() - data_index;
+            let chunk_size = remaining.min(CF_DL_MAX);
+            frame
+                .extend_from_slice(&data[data_index..data_index + chunk_size])
+                .unwrap();
+
+            if !can_manager::send_message(id, &frame).await {
+                return false;
+            }
+
+            data_index += chunk_size;
+            sequence_number = if sequence_number == 0x0F {
+                0
+            } else {
+                sequence_number + 1
+            };
+
+            let block_size = self.block_size.load(Ordering::Acquire);
+            if block_size > 0 {
+                let mut remaining = self.remaining_block_size.load(Ordering::Acquire);
+                remaining -= 1;
+                if remaining == 0 {
+                    // Wait for next Flow Control frame
+                    // Note: In a complete implementation, you would want to add timeout handling here
+                    self.remaining_block_size
+                        .store(block_size, Ordering::Release);
+                }
+            }
+        }
+
         true
     }
 
-    fn handle_single_frame(&mut self, id: u32, data: &[u8]) {
+    async fn handle_single_frame(&mut self, id: u32, data: &[u8]) {
         let length = data[0] & 0x0F;
         if length as usize > data.len() - 1 {
             error!("Invalid SF length");
@@ -115,17 +167,89 @@ impl IsotpHandler {
             .unwrap();
 
         info!("Received complete message: {:02x}", self.rx_buffer);
+
+        // Send structured response to BLE client
+        let message = IsotpMessageReceived {
+            request_arbitration_id: self.request_arbitration_id,
+            reply_arbitration_id: self.reply_arbitration_id,
+            data: self.rx_buffer.clone(),
+        };
+        ble_server::send_isotp_response(message).await;
     }
 
-    fn handle_first_frame(&mut self, _id: u32, _data: &[u8]) {
-        // TODO: Implement First Frame handling
+    async fn handle_first_frame(&mut self, id: u32, data: &[u8]) {
+        if data.len() < 2 {
+            error!("Invalid FF length");
+            return;
+        }
+
+        let length = (((data[0] & 0x0F) as u16) << 8) | (data[1] as u16);
+        if length > FF_DL_MAX as u16 {
+            error!("FF length too large: {}", length);
+            return;
+        }
+
+        self.rx_buffer.clear();
+        self.rx_buffer.extend_from_slice(&data[2..]).unwrap();
+        self.expected_length.store(length, Ordering::Release);
+        self.expected_sequence_number.store(1, Ordering::Release);
+
+        // Send Flow Control frame
+        let mut fc_frame = heapless::Vec::<u8, 8>::new();
+        fc_frame
+            .extend_from_slice(&[
+                FLOW_CONTROL | CONTINUE_TO_SEND,
+                DEFAULT_BLOCK_SIZE,
+                DEFAULT_ST_MIN,
+            ])
+            .unwrap();
+
+        // Send flow control frame asynchronously
+        can_manager::send_message(id, &fc_frame).await;
     }
 
-    fn handle_consecutive_frame(&mut self, _id: u32, _data: &[u8]) {
-        // TODO: Implement Consecutive Frame handling
+    async fn handle_consecutive_frame(&mut self, _id: u32, data: &[u8]) {
+        if data.len() < 2 {
+            error!("Invalid CF length");
+            return;
+        }
+
+        let sequence_number = data[0] & 0x0F;
+        let expected = self.expected_sequence_number.load(Ordering::Acquire);
+
+        if sequence_number != expected {
+            error!(
+                "Unexpected sequence number. Expected: {}, got: {}",
+                expected, sequence_number
+            );
+            return;
+        }
+
+        self.rx_buffer.extend_from_slice(&data[1..]).unwrap();
+
+        let next_sequence = if expected == 0x0F { 0 } else { expected + 1 };
+        self.expected_sequence_number
+            .store(next_sequence, Ordering::Release);
+
+        let expected_length = self.expected_length.load(Ordering::Acquire) as usize;
+        if self.rx_buffer.len() >= expected_length {
+            info!(
+                "Received complete multi-frame message: {:02x}",
+                self.rx_buffer
+            );
+            self.rx_buffer.truncate(expected_length);
+
+            // Send structured response to BLE client
+            let message = IsotpMessageReceived {
+                request_arbitration_id: self.request_arbitration_id,
+                reply_arbitration_id: self.reply_arbitration_id,
+                data: self.rx_buffer.clone(),
+            };
+            ble_server::send_isotp_response(message).await;
+        }
     }
 
-    fn handle_flow_control(&mut self, _id: u32, data: &[u8]) {
+    async fn handle_flow_control(&mut self, _id: u32, data: &[u8]) {
         if data.len() < 3 {
             error!("Invalid FC frame length");
             return;

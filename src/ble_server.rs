@@ -1,5 +1,7 @@
 use defmt::{info, warn};
-use embassy_futures::join::join;
+use embassy_futures::{join::join, select::select};
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::channel::Channel;
 use trouble_host::prelude::*;
 
 use crate::{ble_protocol, isotp_manager};
@@ -16,6 +18,14 @@ const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
 /// Max size of request and response as per BLE characteristic limits
 const MAX_REQUEST_SIZE: usize = 512;
 const MAX_RESPONSE_SIZE: usize = 512;
+
+/// Structure for ISO-TP messages received and ready to be sent over BLE
+#[derive(Debug)]
+pub struct IsotpMessageReceived {
+    pub request_arbitration_id: u32,
+    pub reply_arbitration_id: u32,
+    pub data: heapless::Vec<u8, 4096>,
+}
 
 // GATT Server definition
 #[gatt_server]
@@ -37,6 +47,10 @@ struct SppService {
     // server sends data to the client
     response: heapless::Vec<u8, MAX_RESPONSE_SIZE>,
 }
+
+// Update the channel to use the new struct
+pub static BLE_RESPONSE_CHANNEL: Channel<ThreadModeRawMutex, IsotpMessageReceived, 16> =
+    Channel::new();
 
 /// Run the BLE stack.
 pub async fn run<C, const L2CAP_MTU: usize>(controller: C)
@@ -67,14 +81,11 @@ where
     let _ = join(ble_task(runner), async {
         loop {
             match advertise(DEVICE_NAME, &mut peripheral).await {
-                Ok(conn) => match gatt_events_task(&server, &conn).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        #[cfg(feature = "defmt")]
-                        let e = defmt::Debug2Format(&e);
-                        panic!("[adv] gatt_events_task error: {:?}", e);
-                    }
-                },
+                Ok(conn) => {
+                    let a = incoming_gatt_events_task(&server, &conn);
+                    let b = outgoing_gatt_events_task(&server, &conn);
+                    select(a, b).await;
+                }
                 Err(e) => {
                     #[cfg(feature = "defmt")]
                     let e = defmt::Debug2Format(&e);
@@ -115,11 +126,40 @@ async fn update_response_characteristic(
     }
 }
 
+async fn outgoing_gatt_events_task(
+    server: &Server<'_>,
+    conn: &Connection<'_>,
+) -> Result<(), Error> {
+    loop {
+        // Receive structured message from the channel
+        let message = BLE_RESPONSE_CHANNEL.receive().await;
+
+        // Serialize the message into a single buffer
+        let mut response_data = heapless::Vec::<u8, 512>::new();
+
+        // Write request_arbitration_id (4 bytes)
+        response_data
+            .extend_from_slice(&message.request_arbitration_id.to_be_bytes())
+            .unwrap();
+        // Write reply_arbitration_id (4 bytes)
+        response_data
+            .extend_from_slice(&message.reply_arbitration_id.to_be_bytes())
+            .unwrap();
+        // Write the actual data
+        response_data.extend_from_slice(&message.data).unwrap();
+
+        update_response_characteristic(server, conn, &response_data).await;
+    }
+}
+
 /// Stream Events until the connection closes.
 ///
 /// This function will handle the GATT events and process them.
 /// This is how we interact with read and write requests.
-async fn gatt_events_task(server: &Server<'_>, conn: &Connection<'_>) -> Result<(), Error> {
+async fn incoming_gatt_events_task(
+    server: &Server<'_>,
+    conn: &Connection<'_>,
+) -> Result<(), Error> {
     loop {
         match conn.next().await {
             ConnectionEvent::Disconnected { reason } => {
@@ -218,4 +258,10 @@ async fn advertise<'a, C: Controller>(
     let conn = advertiser.accept().await?;
     info!("[adv] connection established");
     Ok(conn)
+}
+
+// Helper function to send responses to BLE client
+pub async fn send_isotp_response(message: IsotpMessageReceived) {
+    // Ignore send errors - the receiver might be gone
+    let _ = BLE_RESPONSE_CHANNEL.send(message).await;
 }

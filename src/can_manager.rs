@@ -35,11 +35,8 @@ impl interrupt::typelevel::Handler<interrupt::typelevel::PIO2_IRQ_0> for CanInte
 
 // Fixed-size ring buffer for incoming CAN messages
 const RING_BUFFER_SIZE: usize = 32;
-static CAN_RX_QUEUE: Channel<
-    CriticalSectionRawMutex,
-    (u32, heapless::Vec<u8, 8>),
-    RING_BUFFER_SIZE,
-> = Channel::new();
+static CAN_RX_QUEUE: Channel<CriticalSectionRawMutex, CanMessage, RING_BUFFER_SIZE> =
+    Channel::new();
 
 // For 4-6 IDs, we can just use a small fixed array
 const MAX_FILTERS: usize = 8; // Round up to next power of 2 for good measure
@@ -70,6 +67,7 @@ extern "C" fn can_callback(
             }
         }
 
+        // drop message if it does not match our filters
         if !found {
             return;
         }
@@ -81,7 +79,7 @@ extern "C" fn can_callback(
             .extend_from_slice(&frame_data[..(msg.dlc as usize)])
             .is_ok()
         {
-            let _ = CAN_RX_QUEUE.try_send((msg.id, data));
+            let _ = CAN_RX_QUEUE.try_send(CanMessage { id: msg.id, data });
         }
     } else if notify == can2040_rs::notify::TX {
         info!("CAN message sent");
@@ -189,8 +187,8 @@ pub async fn can_isotp_dispatch_task() {
     use crate::isotp_manager;
 
     loop {
-        let (id, data) = CAN_RX_QUEUE.receive().await;
-        isotp_manager::handle_can_frame(id, &data).await;
+        let message = CAN_RX_QUEUE.receive().await;
+        isotp_manager::handle_can_message(message).await;
     }
 }
 
