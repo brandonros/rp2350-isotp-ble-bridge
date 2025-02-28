@@ -154,7 +154,7 @@ impl IsotpHandler {
         true
     }
 
-    async fn handle_single_frame(&mut self, id: u32, data: &[u8]) {
+    async fn handle_single_frame(&mut self, _id: u32, data: &[u8]) {
         let length = data[0] & 0x0F;
         if length as usize > data.len() - 1 {
             error!("Invalid SF length");

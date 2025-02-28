@@ -1,11 +1,9 @@
-use crate::ble_server;
 use crate::can_manager::CanMessage;
 use crate::channels::{ISOTP_BLE_CHANNEL, ISOTP_CAN_CHANNEL};
 use crate::isotp_handler::IsotpHandler;
 use crate::{ble_protocol::*, can_manager};
 use defmt::{error, info, Format};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 
 // Create a static shared manager

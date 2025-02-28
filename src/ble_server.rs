@@ -1,7 +1,5 @@
 use defmt::{info, warn};
 use embassy_futures::{join::join, select::select};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::channel::Channel;
 use trouble_host::prelude::*;
 
 use crate::{ble_protocol, channels::BLE_RESPONSE_CHANNEL, isotp_manager};

@@ -12,13 +12,6 @@ pub struct CanMessage {
     pub data: heapless::Vec<u8, 8>,
 }
 
-// Message type for the CAN task
-#[derive(Debug)]
-pub enum CanChannelMessage {
-    Send(CanMessage),
-    // Add other message types as needed
-}
-
 static CAN_INSTANCE: AtomicPtr<can2040_rs::Can2040> = AtomicPtr::new(core::ptr::null_mut());
 
 pub struct CanInterruptHandler;
