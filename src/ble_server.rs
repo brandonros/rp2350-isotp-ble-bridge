@@ -2,7 +2,11 @@ use defmt::{info, warn};
 use embassy_futures::{join::join, select::select};
 use trouble_host::prelude::*;
 
-use crate::{ble_protocol, channels::BLE_RESPONSE_CHANNEL, isotp_manager};
+use crate::{
+    ble_isotp_bridge,
+    ble_protocol::{self, IsoTpMessage},
+    channels::BLE_RESPONSE_CHANNEL,
+};
 
 /// Device name
 const DEVICE_NAME: &str = "BLE_TO_ISOTP";
@@ -16,14 +20,6 @@ const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
 /// Max size of request and response as per BLE characteristic limits
 const MAX_REQUEST_SIZE: usize = 512;
 const MAX_RESPONSE_SIZE: usize = 512;
-
-/// Structure for ISO-TP messages received and ready to be sent over BLE
-#[derive(Debug)]
-pub struct IsotpMessageReceived {
-    pub request_arbitration_id: u32,
-    pub reply_arbitration_id: u32,
-    pub data: heapless::Vec<u8, 4096>,
-}
 
 // GATT Server definition
 #[gatt_server]
@@ -140,7 +136,7 @@ async fn outgoing_gatt_events_task(
             .extend_from_slice(&message.reply_arbitration_id.to_be_bytes())
             .unwrap();
         // Write the actual data
-        response_data.extend_from_slice(&message.data).unwrap();
+        response_data.extend_from_slice(&message.pdu).unwrap();
 
         update_response_characteristic(server, conn, &response_data).await;
     }
@@ -189,7 +185,7 @@ async fn incoming_gatt_events_task(
 
                                     match ble_protocol::BleMessageParser::parse(data) {
                                         Ok(parsed) => {
-                                            isotp_manager::handle_ble_message(parsed).await;
+                                            ble_isotp_bridge::handle_ble_message(parsed).await;
                                         }
                                         Err(e) => {
                                             warn!("[gatt] Parse error: {:?}", e);
@@ -255,7 +251,7 @@ async fn advertise<'a, C: Controller>(
 }
 
 // Helper function to send responses to BLE client
-pub async fn send_isotp_response(message: IsotpMessageReceived) {
+pub async fn send_isotp_response(message: IsoTpMessage) {
     // Ignore send errors - the receiver might be gone
     let _ = BLE_RESPONSE_CHANNEL.send(message).await;
 }

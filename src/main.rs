@@ -1,12 +1,13 @@
 #![no_std]
 #![no_main]
 
+mod ble_isotp_bridge;
 mod ble_protocol;
 mod ble_server;
 mod can_manager;
 mod channels;
 mod isotp_handler;
-mod isotp_manager;
+mod led;
 
 use bt_hci::controller::ExternalController;
 use cyw43::bluetooth::BtDriver;
@@ -53,18 +54,6 @@ async fn ble_task(bt_device: BtDriver<'static>) {
     ble_server::run::<_, 128>(controller).await;
 }
 
-// blinky task
-#[embassy_executor::task]
-async fn blinky_task(_control: &'static mut cyw43::Control<'static>) {
-    loop {
-        // TODO: turn on later
-        //control.gpio_set(0, true).await;
-        Timer::after(Duration::from_millis(1000)).await;
-        //control.gpio_set(0, false).await;
-        Timer::after(Duration::from_millis(1000)).await;
-    }
-}
-
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     // init peripherals
@@ -106,10 +95,10 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(cyw43_task(runner)));
     control.init(clm).await;
 
-    // init blinky task
+    // init led task
     static CONTROL: StaticCell<cyw43::Control<'static>> = StaticCell::new();
     let control = CONTROL.init(control);
-    unwrap!(spawner.spawn(blinky_task(control)));
+    unwrap!(spawner.spawn(led::led_task(control)));
 
     // init ble peripheral
     unwrap!(spawner.spawn(ble_task(bt_device)));
@@ -126,12 +115,12 @@ async fn main(spawner: Spawner) {
         sys_clock, // sys_clock
         500_000,   // bitrate
     );
-    unwrap!(spawner.spawn(can_manager::can_channel_task()));
+    unwrap!(spawner.spawn(can_manager::can_tx_channel_task()));
+    unwrap!(spawner.spawn(can_manager::can_rx_channel_task()));
 
-    // init isotp manager
-    unwrap!(spawner.spawn(isotp_manager::isotp_manager_ble_task()));
-    unwrap!(spawner.spawn(isotp_manager::isotp_manager_can_task()));
-    unwrap!(spawner.spawn(can_manager::can_isotp_dispatch_task()));
+    // init ble isotp bridge
+    unwrap!(spawner.spawn(ble_isotp_bridge::ble_isotp_bridge_ble_rx_task()));
+    unwrap!(spawner.spawn(ble_isotp_bridge::ble_isotp_bridge_can_rx_task()));
 
     // tasks will run in background
 }

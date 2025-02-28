@@ -1,13 +1,14 @@
 use crate::can_manager::CanMessage;
 use crate::channels::{ISOTP_BLE_CHANNEL, ISOTP_CAN_CHANNEL};
 use crate::isotp_handler::IsotpHandler;
-use crate::{ble_protocol::*, can_manager};
+use crate::{ble_protocol::*, can_manager, led};
 use defmt::{error, info, Format};
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 
 // Create a static shared manager
-static ISOTP_MANAGER: Mutex<ThreadModeRawMutex, IsoTpManager> = Mutex::new(IsoTpManager::new());
+static BLE_ISOTP_BRIDGE: Mutex<ThreadModeRawMutex, BleIsotpBridge> =
+    Mutex::new(BleIsotpBridge::new());
 
 /// Error type for message parsing
 #[derive(Debug, Format)]
@@ -21,16 +22,16 @@ pub enum ManagerError {
 
 const MAX_HANDLERS: usize = 4;
 
-pub struct IsoTpManager {
-    handlers: heapless::FnvIndexMap<u32, IsotpHandler, MAX_HANDLERS>,
-    tx_buffer: heapless::Vec<u8, 4096>,
+pub struct BleIsotpBridge {
+    isotp_handlers: heapless::FnvIndexMap<u32, IsotpHandler, MAX_HANDLERS>,
+    isotp_tx_buffer: heapless::Vec<u8, 4096>,
 }
 
-impl IsoTpManager {
+impl BleIsotpBridge {
     pub const fn new() -> Self {
         Self {
-            handlers: heapless::FnvIndexMap::<u32, IsotpHandler, MAX_HANDLERS>::new(),
-            tx_buffer: heapless::Vec::new(),
+            isotp_handlers: heapless::FnvIndexMap::<u32, IsotpHandler, MAX_HANDLERS>::new(),
+            isotp_tx_buffer: heapless::Vec::new(),
         }
     }
 
@@ -45,33 +46,33 @@ impl IsoTpManager {
                 let chunk = upload_chunk_command.chunk.as_slice();
 
                 // check if offset is valid
-                if offset + chunk_length > self.tx_buffer.len() as u16 {
+                if offset + chunk_length > self.isotp_tx_buffer.len() as u16 {
                     return Err(ManagerError::InvalidOffset);
                 }
 
                 // Copy chunk into tx buffer at offset
                 let start = offset as usize;
                 let end = start + chunk_length as usize;
-                self.tx_buffer[start..end].copy_from_slice(chunk);
+                self.isotp_tx_buffer[start..end].copy_from_slice(chunk);
 
                 Ok(())
             }
             ParsedBleMessage::SendIsotpBuffer(send_isotp_buffer_command) => {
                 let payload_length = send_isotp_buffer_command.total_length;
                 let request_arbitration_id = u32::from_be_bytes([
-                    self.tx_buffer[0],
-                    self.tx_buffer[1],
-                    self.tx_buffer[2],
-                    self.tx_buffer[3],
+                    self.isotp_tx_buffer[0],
+                    self.isotp_tx_buffer[1],
+                    self.isotp_tx_buffer[2],
+                    self.isotp_tx_buffer[3],
                 ]);
                 let reply_arbitration_id = u32::from_be_bytes([
-                    self.tx_buffer[4],
-                    self.tx_buffer[5],
-                    self.tx_buffer[6],
-                    self.tx_buffer[7],
+                    self.isotp_tx_buffer[4],
+                    self.isotp_tx_buffer[5],
+                    self.isotp_tx_buffer[6],
+                    self.isotp_tx_buffer[7],
                 ]);
                 let _msg_length = payload_length - 8;
-                let msg = &self.tx_buffer[8..];
+                let msg = &self.isotp_tx_buffer[8..];
 
                 info!(
                     "Sending message to {}:{}",
@@ -79,7 +80,7 @@ impl IsoTpManager {
                 );
 
                 // lookup filter_index from request_arbitration_id
-                let filter_index = self.handlers.iter().position(|(_key, handler)| {
+                let filter_index = self.isotp_handlers.iter().position(|(_key, handler)| {
                     handler.request_arbitration_id == request_arbitration_id
                         && handler.reply_arbitration_id == reply_arbitration_id
                 });
@@ -89,7 +90,7 @@ impl IsoTpManager {
                 let filter_index = filter_index.unwrap() as u32;
 
                 // get handler by index
-                let handler = self.handlers.get_mut(&filter_index).unwrap();
+                let handler = self.isotp_handlers.get_mut(&filter_index).unwrap();
 
                 // send message
                 match handler.send_message(reply_arbitration_id, msg).await {
@@ -113,7 +114,7 @@ impl IsoTpManager {
 
                 // check if already exists
                 if self
-                    .handlers
+                    .isotp_handlers
                     .contains_key(&configure_filter_command.filter_id)
                 {
                     return Err(ManagerError::FilterAlreadyExists);
@@ -127,7 +128,7 @@ impl IsoTpManager {
                 }
 
                 // insert handler
-                match self.handlers.insert(
+                match self.isotp_handlers.insert(
                     configure_filter_command.filter_id,
                     IsotpHandler::new(
                         configure_filter_command.request_arbitration_id,
@@ -142,37 +143,42 @@ impl IsoTpManager {
     }
 
     async fn handle_can_frame(&mut self, id: u32, data: &[u8]) {
-        for (_filter_id, handler) in self.handlers.iter_mut() {
+        for (_filter_id, handler) in self.isotp_handlers.iter_mut() {
             if handler.request_arbitration_id == id || handler.reply_arbitration_id == id {
-                handler.handle_received_frame(id, data).await;
+                handler.handle_received_can_frame(id, data).await;
             }
         }
     }
 }
 
 #[embassy_executor::task]
-pub async fn isotp_manager_can_task() {
-    info!("IsoTP manager CAN task started");
+pub async fn ble_isotp_bridge_can_rx_task() {
+    info!("BLE IsoTP bridge CAN task started");
 
     loop {
         let can_message = ISOTP_CAN_CHANNEL.receive().await;
+
         // Brief critical section
-        ISOTP_MANAGER
+        BLE_ISOTP_BRIDGE
             .lock()
             .await
             .handle_can_frame(can_message.id, &can_message.data)
             .await;
+
+        // blink led
+        led::blink().await;
     }
 }
 
 #[embassy_executor::task]
-pub async fn isotp_manager_ble_task() {
-    info!("IsoTP manager BLE task started");
+pub async fn ble_isotp_bridge_ble_rx_task() {
+    info!("BLE IsoTP bridge BLE task started");
 
     loop {
         let parsed_message = ISOTP_BLE_CHANNEL.receive().await;
+
         // Brief critical section
-        match ISOTP_MANAGER
+        match BLE_ISOTP_BRIDGE
             .lock()
             .await
             .handle_ble_message(&parsed_message)
@@ -181,6 +187,9 @@ pub async fn isotp_manager_ble_task() {
             Ok(_) => (),
             Err(e) => error!("Error handling BLE message: {:?}", e),
         }
+
+        // blink led
+        led::blink().await;
     }
 }
 

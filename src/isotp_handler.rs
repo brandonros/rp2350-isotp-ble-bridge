@@ -3,7 +3,8 @@ use defmt::{debug, error, info};
 use heapless::Vec;
 use portable_atomic::AtomicU16;
 
-use crate::ble_server::{self, IsotpMessageReceived};
+use crate::ble_protocol::IsoTpMessage;
+use crate::ble_server::{self};
 use crate::can_manager;
 
 // ISO-15765 constants
@@ -55,7 +56,7 @@ impl IsotpHandler {
         }
     }
 
-    pub async fn handle_received_frame(&mut self, id: u32, data: &[u8]) {
+    pub async fn handle_received_can_frame(&mut self, id: u32, data: &[u8]) {
         if data.is_empty() {
             return;
         }
@@ -169,10 +170,10 @@ impl IsotpHandler {
         info!("Received complete message: {:02x}", self.rx_buffer);
 
         // Send structured response to BLE client
-        let message = IsotpMessageReceived {
+        let message = IsoTpMessage {
             request_arbitration_id: self.request_arbitration_id,
             reply_arbitration_id: self.reply_arbitration_id,
-            data: self.rx_buffer.clone(),
+            pdu: self.rx_buffer.clone(),
         };
         ble_server::send_isotp_response(message).await;
     }
@@ -240,10 +241,10 @@ impl IsotpHandler {
             self.rx_buffer.truncate(expected_length);
 
             // Send structured response to BLE client
-            let message = IsotpMessageReceived {
+            let message = IsoTpMessage {
                 request_arbitration_id: self.request_arbitration_id,
                 reply_arbitration_id: self.reply_arbitration_id,
-                data: self.rx_buffer.clone(),
+                pdu: self.rx_buffer.clone(),
             };
             ble_server::send_isotp_response(message).await;
         }

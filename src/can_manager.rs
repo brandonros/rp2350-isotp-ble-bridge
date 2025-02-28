@@ -45,15 +45,14 @@ extern "C" fn can_callback(
         // Safety: msg is valid when notification is RX
         let msg = unsafe { &*msg };
 
-        // Direct comparison against our small set of IDs
         // Safety: We're only reading these values, and they're only modified during init
         let count = unsafe { FILTER_COUNT };
-        let ids = unsafe { &FILTER_IDS };
 
-        // For such a small set, a simple loop is fastest
+        // Direct comparison against our small set of IDs
         let mut found = false;
         for i in 0..count as usize {
-            if msg.id == ids[i] {
+            // Safety: We're only reading the value, and it's only modified during init
+            if msg.id == unsafe { FILTER_IDS[i] } {
                 found = true;
                 break;
             }
@@ -83,7 +82,7 @@ extern "C" fn can_callback(
 }
 
 #[embassy_executor::task]
-pub async fn can_channel_task() {
+pub async fn can_tx_channel_task() {
     info!("CAN task started");
 
     loop {
@@ -171,12 +170,12 @@ pub fn init_can(pio_num: u32, gpio_rx: u32, gpio_tx: u32, sys_clock: u32, bitrat
 
 // New task to process the ring buffer
 #[embassy_executor::task]
-pub async fn can_isotp_dispatch_task() {
-    use crate::isotp_manager;
+pub async fn can_rx_channel_task() {
+    use crate::ble_isotp_bridge;
 
     loop {
         let message = CAN_RX_QUEUE.receive().await;
-        isotp_manager::handle_can_message(message).await;
+        ble_isotp_bridge::handle_can_message(message).await;
     }
 }
 

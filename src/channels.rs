@@ -1,15 +1,13 @@
 //! Inter-module communication channels
 //! This module centralizes all communication channels between different components
 
-use crate::ble_protocol::ParsedBleMessage;
-use crate::ble_server::IsotpMessageReceived;
+use crate::ble_protocol::{IsoTpMessage, ParsedBleMessage};
 use crate::can_manager::CanMessage;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, ThreadModeRawMutex};
 use embassy_sync::channel::Channel;
 
 /// Channel for BLE responses (ISOTP -> BLE)
-pub static BLE_RESPONSE_CHANNEL: Channel<ThreadModeRawMutex, IsotpMessageReceived, 16> =
-    Channel::new();
+pub static BLE_RESPONSE_CHANNEL: Channel<ThreadModeRawMutex, IsoTpMessage, 16> = Channel::new();
 
 /// Channel for CAN messages (CAN Hardware -> ISOTP)
 pub static CAN_CHANNEL: Channel<CriticalSectionRawMutex, CanMessage, 16> = Channel::new();

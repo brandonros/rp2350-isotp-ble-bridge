@@ -7,7 +7,6 @@ use defmt::Format;
 pub enum ParseError {
     InvalidCommand,
     BufferTooSmall,
-    InvalidLength,
 }
 
 /// Command IDs extracted from the JavaScript code
@@ -113,6 +112,7 @@ impl SendIsotpBufferCommand {
 
 /// Start Periodic Message Command (0x04)
 /// Used to start sending a message periodically
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct StartPeriodicMessageCommand {
     pub periodic_message_index: u8,
@@ -129,6 +129,7 @@ impl Command for StartPeriodicMessageCommand {
     }
 }
 
+#[allow(dead_code)]
 impl StartPeriodicMessageCommand {
     /// Parse a start periodic message command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
@@ -204,6 +205,7 @@ impl<'a> Iterator for PeriodicMessageIterator<'a> {
 /// Stop Periodic Message Command (0x05)
 /// Used to stop a periodic message
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct StopPeriodicMessageCommand {
     // Periodic message index to stop
     pub periodic_message_index: u8,
@@ -298,27 +300,7 @@ impl ConfigureFilterCommand {
 pub struct IsoTpMessage {
     pub request_arbitration_id: u32,
     pub reply_arbitration_id: u32,
-    pub pdu: heapless::Vec<u8, 512>,
-}
-
-impl IsoTpMessage {
-    pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
-        // Need at least 8 bytes for the arbitration IDs
-        if buffer.len() < 8 {
-            return Err(ParseError::BufferTooSmall);
-        }
-
-        let request_arbitration_id =
-            u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
-        let reply_arbitration_id = u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]);
-        let pdu = &buffer[8..];
-
-        Ok(Self {
-            request_arbitration_id,
-            reply_arbitration_id,
-            pdu: heapless::Vec::from_slice(pdu).unwrap(),
-        })
-    }
+    pub pdu: heapless::Vec<u8, 4096>,
 }
 
 /// Main message parser
@@ -366,46 +348,4 @@ pub enum ParsedBleMessage {
     StartPeriodicMessage(StartPeriodicMessageCommand),
     StopPeriodicMessage(StopPeriodicMessageCommand),
     ConfigureIsotpFilter(ConfigureFilterCommand),
-}
-
-/// Simple message buffer for accumulating chunks
-pub struct ChunkBuffer {
-    data: [u8; 4096], // Adjust size as needed for your embedded environment
-    size: usize,
-}
-
-impl ChunkBuffer {
-    pub fn new() -> Self {
-        Self {
-            data: [0; 4096],
-            size: 0,
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.size = 0;
-    }
-
-    pub fn add_chunk(&mut self, offset: u16, chunk: &[u8]) -> Result<(), ParseError> {
-        let offset = offset as usize;
-
-        // Check if chunk fits
-        if offset + chunk.len() > self.data.len() {
-            return Err(ParseError::BufferTooSmall);
-        }
-
-        // Copy chunk to buffer
-        self.data[offset..offset + chunk.len()].copy_from_slice(chunk);
-
-        // Update size if needed
-        if offset + chunk.len() > self.size {
-            self.size = offset + chunk.len();
-        }
-
-        Ok(())
-    }
-
-    pub fn get_message(&self) -> &[u8] {
-        &self.data[0..self.size]
-    }
 }
