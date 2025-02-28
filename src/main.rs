@@ -116,7 +116,7 @@ async fn main(spawner: Spawner) {
     // sleep 1s to allow cyw43 to boot
     Timer::after(Duration::from_millis(1000)).await;
 
-    // init can bus - simplified to a single call
+    // init can bus
     let sys_clock = embassy_rp::clocks::clk_sys_freq();
     can_manager::init_can(
         2,         // pio_num
@@ -125,6 +125,7 @@ async fn main(spawner: Spawner) {
         sys_clock, // sys_clock
         500_000,   // bitrate
     );
+    unwrap!(spawner.spawn(can_manager::can_task()));
 
     // tasks will run in background
 }
