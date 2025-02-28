@@ -61,19 +61,19 @@ impl IsotpHandler {
 
     pub async fn send_message(&mut self, id: u32, data: &[u8]) -> bool {
         if data.len() <= SF_DL_MAX {
-            self.send_single_frame(id, data)
+            self.send_single_frame(id, data).await
         } else {
             self.send_multi_frame(id, data).await
         }
     }
 
-    fn send_single_frame(&self, id: u32, data: &[u8]) -> bool {
+    async fn send_single_frame(&self, id: u32, data: &[u8]) -> bool {
         let mut frame = Vec::<u8, 8>::new();
         frame
             .extend_from_slice(&[SINGLE_FRAME | (data.len() as u8)])
             .unwrap();
         frame.extend_from_slice(data).unwrap();
-        can_manager::send_message(id, &frame)
+        can_manager::send_message(id, &frame).await
     }
 
     async fn send_multi_frame(&mut self, id: u32, data: &[u8]) -> bool {
@@ -85,7 +85,7 @@ impl IsotpHandler {
             .unwrap();
         frame.extend_from_slice(&data[0..6]).unwrap();
 
-        if !can_manager::send_message(id, &frame) {
+        if !can_manager::send_message(id, &frame).await {
             return false;
         }
 
