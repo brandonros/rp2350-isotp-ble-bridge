@@ -29,6 +29,8 @@ static_cell = "2.1"
 portable-atomic = "1.11.0"
 # can2040
 can2040_rs = { path = "../can2040_rs" }
+# alloc
+heapless = "0.8.0"
 
 [patch.crates-io]
 embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }

@@ -2,6 +2,8 @@
 #![no_main]
 
 mod ble_bas_peripheral;
+mod ble_protocol;
+mod isotp_handler;
 
 use bt_hci::controller::ExternalController;
 use cyw43::bluetooth::BtDriver;
@@ -68,6 +70,37 @@ async fn blinky_task(control: &'static mut cyw43::Control<'static>) {
     }
 }
 
+fn can_send_message(can_ptr: *mut can2040_rs::Can2040, id: u32, data: &[u8]) -> bool {
+    // build message
+    let mut msg = can2040_rs::can2040_msg::default();
+    msg.id = id; // Standard ID
+    msg.dlc = data.len() as u32; // 8 bytes of data
+    for i in 0..data.len() {
+        unsafe {
+            msg.__bindgen_anon_1.data[i] = data[i];
+        }
+    }
+
+    // check if we can transmit
+    let tx_avail = unsafe { (*can_ptr).check_transmit() };
+    if tx_avail <= 0 {
+        error!("CAN tx buffer is full");
+        return false;
+    }
+
+    // send
+    info!("sending CAN message");
+    match unsafe { (*can_ptr).transmit(&mut msg) } {
+        Ok(_) => true,
+        Err(e) => {
+            error!("Failed to send CAN message: {}", e);
+            false
+        }
+    }
+
+    // TODO: wait for irq tx event?
+}
+
 // can task
 #[embassy_executor::task]
 async fn can_task() {
@@ -78,29 +111,11 @@ async fn can_task() {
         let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
 
         if !can_ptr.is_null() {
-            let mut msg = can2040_rs::can2040_msg::default();
-            msg.id = 0x7e5; // Standard ID
-            msg.dlc = 8; // 8 bytes of data
-            unsafe {
-                msg.__bindgen_anon_1.data[0] = 0x02;
-                msg.__bindgen_anon_1.data[1] = 0x3e;
-                msg.__bindgen_anon_1.data[2] = 0x00;
-                msg.__bindgen_anon_1.data[3] = 0x55;
-                msg.__bindgen_anon_1.data[4] = 0x55;
-                msg.__bindgen_anon_1.data[5] = 0x55;
-                msg.__bindgen_anon_1.data[6] = 0x55;
-                msg.__bindgen_anon_1.data[7] = 0x55;
-            }
-            let tx_avail = unsafe { (*can_ptr).check_transmit() };
-            if tx_avail > 0 {
-                info!("sending CAN message");
-                match unsafe { (*can_ptr).transmit(&mut msg) } {
-                    Ok(_) => info!("CAN message sent"),
-                    Err(e) => error!("Failed to send CAN message: {}", e),
-                }
-            } else {
-                debug!("can.check_transmit = {} (≤ 0)", tx_avail);
-            }
+            can_send_message(
+                can_ptr,
+                0x7e5,
+                &[0x02, 0x3e, 0x00, 0x55, 0x55, 0x55, 0x55, 0x55],
+            );
 
             // Get statistics to help with debugging
             let stats = unsafe { (*can_ptr).get_statistics() };
@@ -131,10 +146,13 @@ extern "C" fn can_callback(
     msg: *mut can2040_rs::can2040_msg,
 ) {
     if notify == can2040_rs::notify::RX {
-        info!("CAN message received");
         // Safety: msg is valid when notification is RX
         let msg = unsafe { &*msg };
-        info!("ID: {}, DLC: {}", msg.id, msg.dlc);
+        let data = unsafe { msg.__bindgen_anon_1.data };
+        info!(
+            "CAN message received: ID: {}, DLC: {} Data: {:02x}",
+            msg.id, msg.dlc, data
+        );
     } else if notify == can2040_rs::notify::TX {
         info!("CAN message sent");
     } else if notify == can2040_rs::notify::ERROR {
@@ -185,31 +203,6 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(cyw43_task(runner)));
     control.init(clm).await;
 
-    // init can task
-    /*let resets = embassy_rp::pac::RESETS;
-    resets.reset().modify(|r| r.set_pio1(false)); // Remove from reset
-    while !resets.reset_done().read().pio1() {
-        // Wait for reset to complete
-        core::hint::spin_loop();
-    }*/
-    unsafe { cortex_m::peripheral::NVIC::unmask(embassy_rp::interrupt::PIO2_IRQ_0) };
-    embassy_rp::interrupt::PIO2_IRQ_0.set_priority(Priority::P1);
-
-    let pio_num = 2;
-    let mut can = can2040_rs::Can2040::new(pio_num);
-    can.setup();
-    can.set_callback(Some(can_callback));
-
-    let can_ptr = &mut can as *mut _;
-    CAN_INSTANCE.store(can_ptr, Ordering::Release);
-
-    let gpio_rx = 10; // goes to transceiver rx, do not flip
-    let gpio_tx = 11; // goes to transceiver tx, do not flip
-    let sys_clock = embassy_rp::clocks::clk_sys_freq();
-    info!("sys_clock: {}", sys_clock);
-    can.start(sys_clock, 500_000, gpio_rx, gpio_tx);
-    unwrap!(spawner.spawn(can_task()));
-
     // init blinky task
     static CONTROL: StaticCell<cyw43::Control<'static>> = StaticCell::new();
     let control = CONTROL.init(control);
@@ -217,4 +210,22 @@ async fn main(spawner: Spawner) {
 
     // init ble peripheral
     unwrap!(spawner.spawn(ble_task(bt_device)));
+
+    // sleep 1s to allow cyw43 to boot
+    Timer::after(Duration::from_millis(1000)).await;
+
+    // init can task
+    unsafe { cortex_m::peripheral::NVIC::unmask(embassy_rp::interrupt::PIO2_IRQ_0) };
+    embassy_rp::interrupt::PIO2_IRQ_0.set_priority(Priority::P1);
+    let pio_num = 2;
+    let mut can = can2040_rs::Can2040::new(pio_num);
+    can.setup();
+    can.set_callback(Some(can_callback));
+    let can_ptr = &mut can as *mut _;
+    CAN_INSTANCE.store(can_ptr, Ordering::Release);
+    let gpio_rx = 10; // goes to transceiver rx, do not flip
+    let gpio_tx = 11; // goes to transceiver tx, do not flip
+    let sys_clock = embassy_rp::clocks::clk_sys_freq();
+    can.start(sys_clock, 500_000, gpio_rx, gpio_tx);
+    unwrap!(spawner.spawn(can_task()));
 }

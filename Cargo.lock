@@ -1334,6 +1334,7 @@ dependencies = [
  "embassy-rp",
  "embassy-sync 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "embassy-time",
+ "heapless",
  "panic-probe",
  "portable-atomic",
  "static_cell",
