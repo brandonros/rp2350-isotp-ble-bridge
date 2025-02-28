@@ -45,11 +45,8 @@ pub trait Command {
 /// Used to upload chunks of a large message
 #[derive(Debug)]
 pub struct UploadChunkCommand<'a> {
-    // 16-bit offset in original JS
     pub offset: u16,
-    // 16-bit length in original JS
     pub chunk_length: u16,
-    // Actual chunk data
     pub chunk: &'a [u8],
 }
 
@@ -67,10 +64,8 @@ impl<'a> UploadChunkCommand<'a> {
             return Err(ParseError::BufferTooSmall);
         }
 
-        // In JS: command.writeUInt16BE(offset, 0x01)
         let offset = u16::from_be_bytes([buffer[1], buffer[2]]);
 
-        // In JS: command.writeUInt16BE(chunk.length, 0x03)
         let chunk_length = u16::from_be_bytes([buffer[3], buffer[4]]);
 
         // Validate that buffer contains enough data
@@ -78,7 +73,6 @@ impl<'a> UploadChunkCommand<'a> {
             return Err(ParseError::BufferTooSmall);
         }
 
-        // In JS: chunk.copy(command, 5)
         let chunk = &buffer[5..5 + chunk_length as usize];
 
         Ok(Self {
@@ -111,7 +105,6 @@ impl SendIsotpBufferCommand {
             return Err(ParseError::BufferTooSmall);
         }
 
-        // In JS: command.writeUInt16BE(offset, 0x01)
         let total_length = u16::from_be_bytes([buffer[1], buffer[2]]);
 
         Ok(Self { total_length })
@@ -122,17 +115,11 @@ impl SendIsotpBufferCommand {
 /// Used to start sending a message periodically
 #[derive(Debug)]
 pub struct StartPeriodicMessageCommand<'a> {
-    // Periodic message index (8-bit in JS)
     pub periodic_message_index: u8,
-    // Interval in milliseconds (16-bit in JS)
-    pub interval: u16,
-    // Request arbitration ID (32-bit in JS)
+    pub interval_ms: u16,
     pub request_arbitration_id: u32,
-    // Reply arbitration ID (32-bit in JS)
     pub reply_arbitration_id: u32,
-    // Number of messages (16-bit in JS)
     pub message_count: u16,
-    // Message payloads (each preceded by 16-bit length)
     pub message_data: &'a [u8],
 }
 
@@ -152,7 +139,7 @@ impl<'a> StartPeriodicMessageCommand<'a> {
         }
 
         let periodic_message_index = buffer[1];
-        let interval = u16::from_be_bytes([buffer[2], buffer[3]]);
+        let interval_ms = u16::from_be_bytes([buffer[2], buffer[3]]);
         let request_arbitration_id =
             u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]);
         let reply_arbitration_id =
@@ -164,7 +151,7 @@ impl<'a> StartPeriodicMessageCommand<'a> {
 
         Ok(Self {
             periodic_message_index,
-            interval,
+            interval_ms,
             request_arbitration_id,
             reply_arbitration_id,
             message_count,

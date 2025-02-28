@@ -26,6 +26,8 @@ const DEFAULT_ST_MIN: u8 = 0x0A; // 10ms
 const DEFAULT_BLOCK_SIZE: u8 = 0x00; // Send all frames
 
 pub struct IsotpHandler {
+    pub request_arbitration_id: u32,
+    pub reply_arbitration_id: u32,
     rx_buffer: Vec<u8, 4096>,
     tx_buffer: Vec<u8, 4096>,
     tx_index: AtomicU8,
@@ -34,8 +36,10 @@ pub struct IsotpHandler {
 }
 
 impl IsotpHandler {
-    pub fn new() -> Self {
+    pub fn new(request_arbitration_id: u32, reply_arbitration_id: u32) -> Self {
         Self {
+            request_arbitration_id,
+            reply_arbitration_id,
             rx_buffer: Vec::new(),
             tx_buffer: Vec::new(),
             tx_index: AtomicU8::new(0),
