@@ -92,21 +92,19 @@ impl BleIsotpBridge {
                     request_arbitration_id, reply_arbitration_id
                 );
 
-                // lookup filter_index from request_arbitration_id
-                let filter_index = self.isotp_handlers.iter().position(|(_key, handler)| {
+                // Find the handler that matches both IDs
+                let matching_handler = self.isotp_handlers.iter_mut().find(|(_key, handler)| {
                     handler.request_arbitration_id == request_arbitration_id
                         && handler.reply_arbitration_id == reply_arbitration_id
                 });
-                if filter_index.is_none() {
-                    return Err(ManagerError::FilterNotFound);
-                }
-                let filter_index = filter_index.unwrap() as u32;
 
-                // get handler by index
-                let handler = self.isotp_handlers.get_mut(&filter_index).unwrap();
+                let handler = match matching_handler {
+                    Some((_key, handler)) => handler,
+                    None => return Err(ManagerError::FilterNotFound),
+                };
 
                 // send message
-                match handler.send_message(reply_arbitration_id, msg).await {
+                match handler.send_message(request_arbitration_id, msg).await {
                     true => Ok(()),
                     false => Err(ManagerError::FailedToSendMessage),
                 }
@@ -119,7 +117,7 @@ impl BleIsotpBridge {
             }
             ParsedBleMessage::ConfigureIsotpFilter(configure_filter_command) => {
                 info!(
-                    "Configuring filter: {} {} {}",
+                    "Configuring filter: {:x} {:x} {:x}",
                     configure_filter_command.filter_id,
                     configure_filter_command.request_arbitration_id,
                     configure_filter_command.reply_arbitration_id
@@ -148,9 +146,11 @@ impl BleIsotpBridge {
                         configure_filter_command.reply_arbitration_id,
                     ),
                 ) {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err(ManagerError::FailedToInsertFilter),
+                    Ok(_) => (),
+                    Err(_) => return Err(ManagerError::FailedToInsertFilter),
                 }
+
+                Ok(())
             }
         }
     }

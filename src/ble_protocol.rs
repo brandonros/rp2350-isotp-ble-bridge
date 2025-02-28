@@ -1,6 +1,6 @@
 use core::convert::TryFrom;
 
-use defmt::Format;
+use defmt::{debug, Format};
 
 /// Error type for message parsing
 #[derive(Debug, Format)]
@@ -58,6 +58,8 @@ impl Command for UploadChunkCommand {
 impl UploadChunkCommand {
     /// Parse an upload chunk command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
+        debug!("[ble] UploadChunkCommand: {:02x}", buffer);
+
         // Need at least 5 bytes: command(1) + offset(2) + length(2)
         if buffer.len() < 5 {
             return Err(ParseError::BufferTooSmall);
@@ -99,6 +101,8 @@ impl Command for SendIsotpBufferCommand {
 impl SendIsotpBufferCommand {
     /// Parse a trigger BLE send command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
+        debug!("[ble] SendIsotpBufferCommand: {:02x}", buffer);
+
         // Need 3 bytes: command(1) + length(2)
         if buffer.len() < 3 {
             return Err(ParseError::BufferTooSmall);
@@ -265,6 +269,8 @@ impl Command for ConfigureFilterCommand {
 impl ConfigureFilterCommand {
     /// Parse a configure filter command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
+        debug!("[ble] ConfigureFilterCommand: {:02x}", buffer);
+
         // Need at least 13 bytes: command(1) + filter_id(4) + req_id(4) + reply_id(4) + name_len(4)
         if buffer.len() < 17 {
             return Err(ParseError::BufferTooSmall);

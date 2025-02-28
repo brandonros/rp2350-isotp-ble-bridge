@@ -94,6 +94,11 @@ pub async fn can_tx_channel_task() {
             can_message.id, can_message.data
         );
 
+        if can_message.data.len() != 8 {
+            error!("CAN message data is not 8 bytes");
+            continue;
+        }
+
         // Load the pointer once
         let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
 

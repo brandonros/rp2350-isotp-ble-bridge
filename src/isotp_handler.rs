@@ -79,12 +79,19 @@ impl IsotpHandler {
         }
     }
 
+    fn pad_frame(frame: &mut Vec<u8, 8>) {
+        while frame.len() < 8 {
+            frame.extend_from_slice(&[0x00]).unwrap();
+        }
+    }
+
     async fn send_single_frame(&self, id: u32, data: &[u8]) -> bool {
         let mut frame = Vec::<u8, 8>::new();
         frame
             .extend_from_slice(&[SINGLE_FRAME | (data.len() as u8)])
             .unwrap();
         frame.extend_from_slice(data).unwrap();
+        Self::pad_frame(&mut frame);
         can_manager::send_message(id, &frame).await
     }
 
@@ -96,6 +103,7 @@ impl IsotpHandler {
             .extend_from_slice(&[FIRST_FRAME | ((length >> 8) as u8), length as u8])
             .unwrap();
         frame.extend_from_slice(&data[0..6]).unwrap();
+        // First frame is already 8 bytes, no padding needed
 
         if !can_manager::send_message(id, &frame).await {
             return false;
@@ -127,6 +135,7 @@ impl IsotpHandler {
             frame
                 .extend_from_slice(&data[data_index..data_index + chunk_size])
                 .unwrap();
+            Self::pad_frame(&mut frame);
 
             if !can_manager::send_message(id, &frame).await {
                 return false;
@@ -204,6 +213,7 @@ impl IsotpHandler {
                 DEFAULT_ST_MIN,
             ])
             .unwrap();
+        Self::pad_frame(&mut fc_frame);
 
         // Send flow control frame asynchronously
         can_manager::send_message(id, &fc_frame).await;
