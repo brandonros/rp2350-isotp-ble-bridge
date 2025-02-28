@@ -2,6 +2,7 @@ use defmt::{debug, error, info};
 use embassy_rp::interrupt;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use embassy_time::{Duration, Timer};
 use portable_atomic::{AtomicPtr, Ordering};
 
 use crate::{channels::CAN_CHANNEL, isotp_ble_bridge};
@@ -42,6 +43,8 @@ extern "C" fn can_callback(
     msg: *mut can2040_rs::can2040_msg,
 ) {
     if notify == can2040_rs::notify::RX {
+        info!("[can] CAN message received");
+
         // Safety: msg is valid when notification is RX
         let msg = unsafe { &*msg };
 
@@ -74,29 +77,29 @@ extern "C" fn can_callback(
             let _ = CAN_RX_QUEUE.try_send(CanMessage { id: msg.id, data });
         }
     } else if notify == can2040_rs::notify::TX {
-        info!("CAN message sent");
+        info!("[can] CAN message sent");
     } else if notify == can2040_rs::notify::ERROR {
-        info!("CAN error");
+        info!("[can] CAN error");
     } else {
-        debug!("can_callback: unknown notify: {}", notify);
+        debug!("[can] can_callback: unknown notify: {}", notify);
     }
 }
 
 #[embassy_executor::task]
 pub async fn can_tx_channel_task() {
-    info!("CAN task started");
+    info!("[can] CAN task started");
 
     loop {
         // Wait for the next message
         let can_message = CAN_CHANNEL.receive().await;
 
         info!(
-            "sending CAN message to {:x} {:02x}",
+            "[can] sending CAN message to {:x} {:02x}",
             can_message.id, can_message.data
         );
 
         if can_message.data.len() != 8 {
-            error!("CAN message data is not 8 bytes");
+            error!("[can] CAN message data is not 8 bytes");
             continue;
         }
 
@@ -104,7 +107,7 @@ pub async fn can_tx_channel_task() {
         let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
 
         if can_ptr.is_null() {
-            error!("CAN instance not initialized");
+            error!("[can] CAN instance not initialized");
             continue;
         }
 
@@ -121,14 +124,14 @@ pub async fn can_tx_channel_task() {
         // check if we can transmit
         let tx_avail = unsafe { (*can_ptr).check_transmit() };
         if tx_avail <= 0 {
-            error!("CAN tx buffer is full");
+            error!("[can] CAN tx buffer is full");
             continue;
         }
 
         // send
         match unsafe { (*can_ptr).transmit(&mut msg) } {
-            Ok(_) => debug!("CAN message sent successfully"),
-            Err(e) => error!("Failed to send CAN message: {}", e),
+            Ok(_) => debug!("[can] CAN message sent successfully"),
+            Err(e) => error!("[can] Failed to send CAN message: {}", e),
         }
     }
 }
@@ -143,7 +146,7 @@ pub async fn send_message(id: u32, data: &[u8]) -> bool {
             true
         }
         Err(_) => {
-            error!("Data too large for CAN message");
+            error!("[can] Data too large for CAN message");
             false
         }
     }
@@ -170,12 +173,32 @@ pub fn init_can(pio_num: u32, gpio_rx: u32, gpio_tx: u32, sys_clock: u32, bitrat
     unsafe { cortex_m::peripheral::NVIC::unmask(embassy_rp::interrupt::PIO2_IRQ_0) };
     embassy_rp::interrupt::PIO2_IRQ_0.set_priority(Priority::P1);
 
-    let mut can = can2040_rs::Can2040::new(pio_num);
+    // Create CAN instance in static storage to ensure it lives for the program duration
+    static mut CAN: Option<can2040_rs::Can2040> = None;
+
+    // Safety: This is only called once during initialization
+    let can = unsafe {
+        CAN = Some(can2040_rs::Can2040::new(pio_num));
+        CAN.as_mut().unwrap()
+    };
+
     can.setup();
     can.set_callback(Some(can_callback));
-    let can_ptr = &mut can as *mut _;
+    let can_ptr = can as *mut _;
     init_instance(can_ptr);
     can.start(sys_clock, bitrate, gpio_rx, gpio_tx);
+}
+
+#[embassy_executor::task]
+pub async fn can_stats_task() {
+    loop {
+        let stats = get_statistics().unwrap();
+        info!(
+            "[can] stats: tx {:?}, tx_attempt {:?}, parse_error {:?}, rx {:?}",
+            stats.tx_total, stats.tx_attempt, stats.parse_error, stats.rx_total
+        );
+        Timer::after(Duration::from_millis(1000)).await;
+    }
 }
 
 // New task to process the ring buffer

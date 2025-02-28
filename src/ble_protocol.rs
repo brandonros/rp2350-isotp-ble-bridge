@@ -15,8 +15,8 @@ pub enum ParseError {
 pub enum CommandId {
     UploadIsotpChunk = 0x02,
     SendIsotpBuffer = 0x03,
-    StartPeriodicMessage = 0x04,
-    StopPeriodicMessage = 0x05,
+    StartPeriodicIsotpMessage = 0x04,
+    StopPeriodicIsotpMessage = 0x05,
     ConfigureIsotpFilter = 0x06,
 }
 
@@ -27,8 +27,8 @@ impl TryFrom<u8> for CommandId {
         match value {
             0x02 => Ok(CommandId::UploadIsotpChunk),
             0x03 => Ok(CommandId::SendIsotpBuffer),
-            0x04 => Ok(CommandId::StartPeriodicMessage),
-            0x05 => Ok(CommandId::StopPeriodicMessage),
+            0x04 => Ok(CommandId::StartPeriodicIsotpMessage),
+            0x05 => Ok(CommandId::StopPeriodicIsotpMessage),
             0x06 => Ok(CommandId::ConfigureIsotpFilter),
             _ => Err(ParseError::InvalidCommand),
         }
@@ -42,24 +42,22 @@ pub trait Command {
 
 /// Upload Chunk Command (0x02)
 /// Used to upload chunks of a large message
-#[derive(Debug)]
-pub struct UploadChunkCommand {
+#[derive(Debug, Format)]
+pub struct UploadIsotpChunkCommand {
     pub offset: u16,
     pub chunk_length: u16,
     pub chunk: heapless::Vec<u8, 512>,
 }
 
-impl Command for UploadChunkCommand {
+impl Command for UploadIsotpChunkCommand {
     fn command_id(&self) -> CommandId {
         CommandId::UploadIsotpChunk
     }
 }
 
-impl UploadChunkCommand {
+impl UploadIsotpChunkCommand {
     /// Parse an upload chunk command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
-        debug!("[ble] UploadChunkCommand: {:02x}", buffer);
-
         // Need at least 5 bytes: command(1) + offset(2) + length(2)
         if buffer.len() < 5 {
             return Err(ParseError::BufferTooSmall);
@@ -86,7 +84,7 @@ impl UploadChunkCommand {
 
 /// Trigger BLE Send Command (0x03)
 /// Used to trigger sending of accumulated chunks
-#[derive(Debug)]
+#[derive(Debug, Format)]
 pub struct SendIsotpBufferCommand {
     // Total length of message to send
     pub total_length: u16,
@@ -118,7 +116,7 @@ impl SendIsotpBufferCommand {
 /// Used to start sending a message periodically
 #[allow(dead_code)]
 #[derive(Debug)]
-pub struct StartPeriodicMessageCommand {
+pub struct StartPeriodicIsotpMessageCommand {
     pub periodic_message_index: u8,
     pub interval_ms: u16,
     pub request_arbitration_id: u32,
@@ -127,14 +125,14 @@ pub struct StartPeriodicMessageCommand {
     pub message_data: heapless::Vec<u8, 512>,
 }
 
-impl Command for StartPeriodicMessageCommand {
+impl Command for StartPeriodicIsotpMessageCommand {
     fn command_id(&self) -> CommandId {
-        CommandId::StartPeriodicMessage
+        CommandId::StartPeriodicIsotpMessage
     }
 }
 
 #[allow(dead_code)]
-impl StartPeriodicMessageCommand {
+impl StartPeriodicIsotpMessageCommand {
     /// Parse a start periodic message command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
         // Need at least 14 bytes for header
@@ -210,7 +208,7 @@ impl<'a> Iterator for PeriodicMessageIterator<'a> {
 /// Used to stop a periodic message
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct StopPeriodicMessageCommand {
+pub struct StopPeriodicIsotpMessageCommand {
     // Periodic message index to stop
     pub periodic_message_index: u8,
     // Request arbitration ID
@@ -219,13 +217,13 @@ pub struct StopPeriodicMessageCommand {
     pub reply_arbitration_id: u32,
 }
 
-impl Command for StopPeriodicMessageCommand {
+impl Command for StopPeriodicIsotpMessageCommand {
     fn command_id(&self) -> CommandId {
-        CommandId::StopPeriodicMessage
+        CommandId::StopPeriodicIsotpMessage
     }
 }
 
-impl StopPeriodicMessageCommand {
+impl StopPeriodicIsotpMessageCommand {
     /// Parse a stop periodic message command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
         // Need 10 bytes: command(1) + index(1) + req_id(4) + reply_id(4)
@@ -248,8 +246,8 @@ impl StopPeriodicMessageCommand {
 
 /// Configure Filter Command (0x06)
 /// Used to configure a message filter
-#[derive(Debug)]
-pub struct ConfigureFilterCommand {
+#[derive(Debug, Format)]
+pub struct ConfigureIsotpFilterCommand {
     // Filter ID
     pub filter_id: u32,
     // Request arbitration ID
@@ -260,16 +258,16 @@ pub struct ConfigureFilterCommand {
     pub name: heapless::Vec<u8, 32>,
 }
 
-impl Command for ConfigureFilterCommand {
+impl Command for ConfigureIsotpFilterCommand {
     fn command_id(&self) -> CommandId {
         CommandId::ConfigureIsotpFilter
     }
 }
 
-impl ConfigureFilterCommand {
+impl ConfigureIsotpFilterCommand {
     /// Parse a configure filter command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
-        debug!("[ble] ConfigureFilterCommand: {:02x}", buffer);
+        debug!("[ble] ConfigureIsotpFilterCommand: {:02x}", buffer);
 
         // Need at least 13 bytes: command(1) + filter_id(4) + req_id(4) + reply_id(4) + name_len(4)
         if buffer.len() < 17 {
@@ -302,7 +300,7 @@ impl ConfigureFilterCommand {
 
 /// Message payload with arbitration IDs
 /// This represents the format of data messages
-#[derive(Debug)]
+#[derive(Debug, Format)]
 pub struct IsoTpMessage {
     pub request_arbitration_id: u32,
     pub reply_arbitration_id: u32,
@@ -323,23 +321,23 @@ impl BleMessageParser {
 
         match command_id {
             CommandId::UploadIsotpChunk => {
-                let command = UploadChunkCommand::parse(buffer)?;
+                let command = UploadIsotpChunkCommand::parse(buffer)?;
                 Ok(ParsedBleMessage::UploadIsotpChunk(command))
             }
             CommandId::SendIsotpBuffer => {
                 let command = SendIsotpBufferCommand::parse(buffer)?;
                 Ok(ParsedBleMessage::SendIsotpBuffer(command))
             }
-            CommandId::StartPeriodicMessage => {
-                let command = StartPeriodicMessageCommand::parse(buffer)?;
-                Ok(ParsedBleMessage::StartPeriodicMessage(command))
+            CommandId::StartPeriodicIsotpMessage => {
+                let command = StartPeriodicIsotpMessageCommand::parse(buffer)?;
+                Ok(ParsedBleMessage::StartPeriodicIsotpMessage(command))
             }
-            CommandId::StopPeriodicMessage => {
-                let command = StopPeriodicMessageCommand::parse(buffer)?;
-                Ok(ParsedBleMessage::StopPeriodicMessage(command))
+            CommandId::StopPeriodicIsotpMessage => {
+                let command = StopPeriodicIsotpMessageCommand::parse(buffer)?;
+                Ok(ParsedBleMessage::StopPeriodicIsotpMessage(command))
             }
             CommandId::ConfigureIsotpFilter => {
-                let command = ConfigureFilterCommand::parse(buffer)?;
+                let command = ConfigureIsotpFilterCommand::parse(buffer)?;
                 Ok(ParsedBleMessage::ConfigureIsotpFilter(command))
             }
         }
@@ -349,9 +347,9 @@ impl BleMessageParser {
 /// Enum containing all possible parsed messages
 #[derive(Debug)]
 pub enum ParsedBleMessage {
-    UploadIsotpChunk(UploadChunkCommand),
+    UploadIsotpChunk(UploadIsotpChunkCommand),
     SendIsotpBuffer(SendIsotpBufferCommand),
-    StartPeriodicMessage(StartPeriodicMessageCommand),
-    StopPeriodicMessage(StopPeriodicMessageCommand),
-    ConfigureIsotpFilter(ConfigureFilterCommand),
+    StartPeriodicIsotpMessage(StartPeriodicIsotpMessageCommand),
+    StopPeriodicIsotpMessage(StopPeriodicIsotpMessageCommand),
+    ConfigureIsotpFilter(ConfigureIsotpFilterCommand),
 }

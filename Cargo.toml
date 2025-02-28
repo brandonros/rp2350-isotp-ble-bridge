@@ -14,7 +14,7 @@ embassy-time = { version = "*", features = ["defmt", "defmt-timestamp-uptime"] }
 embassy-rp = { version = "*", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp235xa", "binary-info"] }
 cortex-m = "0.7.6"
 cortex-m-rt = "0.7.0"
-cyw43 = { version = "*", features = ["defmt", "firmware-logs", "bluetooth"] }
+cyw43 = { version = "*", features = ["defmt", "bluetooth"] }
 cyw43-pio = { version = "*", features = ["defmt"] }
 # bluetooth
 bt-hci = { version = "*", features = ["embassy-time", "uuid", "defmt"] }
@@ -33,15 +33,16 @@ can2040_rs = { path = "../can2040_rs" }
 heapless = "0.8.0"
 # critical section
 critical-section = "1.2.0"
+fixed = "1.29.0"
 
 [patch.crates-io]
-embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
-embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
-cyw43 = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
-cyw43-pio = { git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6" }
-bt-hci = { git = "https://github.com/embassy-rs/bt-hci", rev = "21ba1ce" }
-trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "b6694cf" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "17301c00e986c5b8536435ea31ebf5aaf13aed17" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "17301c00e986c5b8536435ea31ebf5aaf13aed17" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "17301c00e986c5b8536435ea31ebf5aaf13aed17" }
+cyw43 = { git = "https://github.com/embassy-rs/embassy", rev = "17301c00e986c5b8536435ea31ebf5aaf13aed17" }
+cyw43-pio = { git = "https://github.com/embassy-rs/embassy", rev = "17301c00e986c5b8536435ea31ebf5aaf13aed17" }
+bt-hci = { git = "https://github.com/embassy-rs/bt-hci", rev = "21ba1ce181c74e4abc9dd28b87b7214dde7c0483" }
+trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "92841fcc8bb986368456239a7bbf25be2f709ec1" }
 
 [features]
 default = ["defmt"]

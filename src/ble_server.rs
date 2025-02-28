@@ -124,6 +124,8 @@ async fn outgoing_gatt_events_task(
         // Receive structured message from the channel
         let message = BLE_RESPONSE_CHANNEL.receive().await;
 
+        debug!("[ble] outgoing_gatt_events_task message: {:?}", message);
+
         // Serialize the message into a single buffer
         let mut response_data = heapless::Vec::<u8, 512>::new();
 
@@ -137,6 +139,11 @@ async fn outgoing_gatt_events_task(
             .unwrap();
         // Write the actual data
         response_data.extend_from_slice(&message.pdu).unwrap();
+
+        debug!(
+            "[ble] outgoing_gatt_events_task response_data: {:02x}",
+            response_data
+        );
 
         update_response_characteristic(server, conn, &response_data).await;
     }
@@ -158,7 +165,9 @@ async fn incoming_gatt_events_task(
         match conn.next().await {
             ConnectionEvent::Disconnected { reason } => {
                 info!("[gatt] disconnected: {:?}", reason);
-                break;
+
+                // restart on disconnect
+                cortex_m::peripheral::SCB::sys_reset();
             }
             ConnectionEvent::Gatt { data: gatt_data } => {
                 // We can choose to handle event directly without an attribute table
@@ -174,7 +183,8 @@ async fn incoming_gatt_events_task(
                     Ok(Some(gatt_event)) => {
                         match &gatt_event {
                             GattEvent::Read(read_event) => {
-                                if read_event.handle() == response_handle {
+                                let event_handle = read_event.handle();
+                                if event_handle == response_handle {
                                     info!("[gatt] Read Event to Response Characteristic");
                                 } else {
                                     warn!("[gatt] Read Event to Unknown Characteristic");
@@ -230,8 +240,6 @@ async fn incoming_gatt_events_task(
             }
         }
     }
-    info!("[gatt] task finished");
-    Ok(())
 }
 
 /// Create an advertiser to use to connect to a BLE Central, and wait for it to connect.

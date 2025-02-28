@@ -11,15 +11,16 @@ mod led;
 
 use bt_hci::controller::ExternalController;
 use cyw43::bluetooth::BtDriver;
-use cyw43_pio::{PioSpi, RM2_CLOCK_DIVIDER};
-use defmt::unwrap;
+use cyw43_pio::{PioSpi, DEFAULT_CLOCK_DIVIDER, RM2_CLOCK_DIVIDER};
+use defmt::{info, unwrap};
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
-use embassy_rp::gpio::{Level, Output};
+use embassy_rp::gpio::{Input, Level, Output, Pull};
 use embassy_rp::peripherals::{DMA_CH0, PIO0, UART1};
 use embassy_rp::pio::{self, Pio};
 use embassy_rp::uart::{self};
 use embassy_time::{Duration, Timer};
+use fixed::FixedU32;
 use static_cell::StaticCell;
 use {defmt_serial as _, panic_probe as _};
 
@@ -81,7 +82,7 @@ async fn main(spawner: Spawner) {
     let spi = PioSpi::new(
         &mut pio.common,
         pio.sm0,
-        RM2_CLOCK_DIVIDER,
+        FixedU32::from_bits(0x400), // do not use RM2_CLOCK_DIVIDER or DEFAULT_CLOCK_DIVIDER?
         pio.irq0,
         cs,
         p.PIN_24,
@@ -95,16 +96,22 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(cyw43_task(runner)));
     control.init(clm).await;
 
+    // sleep to allow cyw43 to settle
+    Timer::after(Duration::from_millis(250)).await;
+
     // init led task
     static CONTROL: StaticCell<cyw43::Control<'static>> = StaticCell::new();
     let control = CONTROL.init(control);
     unwrap!(spawner.spawn(led::led_task(control)));
 
+    // sleep to allow cyw43 to settle
+    Timer::after(Duration::from_millis(250)).await;
+
     // init ble peripheral
     unwrap!(spawner.spawn(ble_task(bt_device)));
 
-    // sleep 1s to allow cyw43 to boot
-    Timer::after(Duration::from_millis(1000)).await;
+    // sleep to allow cyw43 to settle
+    Timer::after(Duration::from_millis(250)).await;
 
     // init can bus
     let sys_clock = embassy_rp::clocks::clk_sys_freq();
@@ -115,8 +122,13 @@ async fn main(spawner: Spawner) {
         sys_clock, // sys_clock
         500_000,   // bitrate
     );
+
+    // sleep to allow can to settle
+    Timer::after(Duration::from_millis(250)).await;
+
     unwrap!(spawner.spawn(can_manager::can_tx_channel_task()));
     unwrap!(spawner.spawn(can_manager::can_rx_channel_task()));
+    unwrap!(spawner.spawn(can_manager::can_stats_task()));
 
     // init ble isotp bridge
     unwrap!(spawner.spawn(isotp_ble_bridge::isotp_ble_bridge_ble_rx_task()));

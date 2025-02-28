@@ -16,6 +16,7 @@ pub enum ManagerError {
     FailedToInsertFilter,
     FilterAlreadyExists,
     InvalidOffset,
+    InvalidPayloadLength,
     FilterNotFound,
     FailedToSendMessage,
 }
@@ -42,14 +43,11 @@ impl IsotpBleBridge {
     ) -> Result<(), ManagerError> {
         match parsed {
             ParsedBleMessage::UploadIsotpChunk(upload_chunk_command) => {
+                debug!("UploadIsotpChunk: {:?}", upload_chunk_command);
+
                 let offset = upload_chunk_command.offset;
                 let chunk_length = upload_chunk_command.chunk_length;
                 let chunk = upload_chunk_command.chunk.as_slice();
-
-                debug!(
-                    "[ble] UploadIsotpChunk: offset: {}, chunk_length: {}",
-                    offset, chunk_length
-                );
 
                 // check if offset + length would exceed max buffer size
                 if offset + chunk_length > MAX_TX_BUFFER_SIZE as u16 {
@@ -71,6 +69,8 @@ impl IsotpBleBridge {
                 Ok(())
             }
             ParsedBleMessage::SendIsotpBuffer(send_isotp_buffer_command) => {
+                debug!("SendIsotpBuffer: {:?}", send_isotp_buffer_command);
+
                 let payload_length = send_isotp_buffer_command.total_length;
                 let request_arbitration_id = u32::from_be_bytes([
                     self.isotp_tx_buffer[0],
@@ -84,12 +84,22 @@ impl IsotpBleBridge {
                     self.isotp_tx_buffer[6],
                     self.isotp_tx_buffer[7],
                 ]);
-                let _msg_length = payload_length - 8;
                 let msg = &self.isotp_tx_buffer[8..];
 
+                // subtract 8 bytes for the arbitration ids
+                if msg.len() != (payload_length - 8) as usize {
+                    debug!(
+                        "Invalid payload length: {:?}, {:?}, {:02x}",
+                        payload_length,
+                        msg.len(),
+                        msg
+                    );
+                    return Err(ManagerError::InvalidPayloadLength);
+                }
+
                 info!(
-                    "Sending message to {}:{}",
-                    request_arbitration_id, reply_arbitration_id
+                    "Sending message to {:x}:{:x} {:02x}",
+                    request_arbitration_id, reply_arbitration_id, msg
                 );
 
                 // Find the handler that matches both IDs
@@ -104,24 +114,22 @@ impl IsotpBleBridge {
                 };
 
                 // send message
-                match handler.send_message(request_arbitration_id, msg).await {
+                match handler
+                    .send_isotp_message(request_arbitration_id, msg)
+                    .await
+                {
                     true => Ok(()),
                     false => Err(ManagerError::FailedToSendMessage),
                 }
             }
-            ParsedBleMessage::StartPeriodicMessage(_start_periodic_message_command) => {
+            ParsedBleMessage::StartPeriodicIsotpMessage(_start_periodic_message_command) => {
                 todo!()
             }
-            ParsedBleMessage::StopPeriodicMessage(_stop_periodic_message_command) => {
+            ParsedBleMessage::StopPeriodicIsotpMessage(_stop_periodic_message_command) => {
                 todo!()
             }
             ParsedBleMessage::ConfigureIsotpFilter(configure_filter_command) => {
-                info!(
-                    "Configuring filter: {:x} {:x} {:x}",
-                    configure_filter_command.filter_id,
-                    configure_filter_command.request_arbitration_id,
-                    configure_filter_command.reply_arbitration_id
-                );
+                debug!("ConfigureIsotpFilter: {:?}", configure_filter_command);
 
                 // check if already exists
                 if self

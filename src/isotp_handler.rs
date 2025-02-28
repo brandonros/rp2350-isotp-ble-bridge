@@ -73,7 +73,7 @@ impl IsotpHandler {
         }
     }
 
-    pub async fn send_message(&mut self, id: u32, data: &[u8]) -> bool {
+    pub async fn send_isotp_message(&mut self, id: u32, data: &[u8]) -> bool {
         if data.len() <= SF_DL_MAX {
             self.send_single_frame(id, data).await
         } else {

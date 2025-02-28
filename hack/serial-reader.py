@@ -9,7 +9,7 @@ def read_and_print_defmt_output(process):
         print(line.decode(), end='')
 
 def read_serial():
-    elf_path = "/Users/brandon/.cargo/target/thumbv8m.main-none-eabihf/debug/rp2350-ble"
+    elf_path = "/Users/brandon/.cargo/target/thumbv8m.main-none-eabihf/release/rp2350-isotp-ble-bridge"
 
     ser = serial.Serial(
         port='/dev/tty.usbserial-A50285BI',
