@@ -18,7 +18,7 @@ pub async fn led_task(control: &'static mut Control<'static>) {
         match receiver.receive().await {
             LedCommand::Blink => {
                 control.gpio_set(0, true).await;
-                Timer::after(Duration::from_millis(100)).await;
+                Timer::after(Duration::from_millis(10)).await;
                 control.gpio_set(0, false).await;
             }
         }

@@ -34,12 +34,6 @@ impl TryFrom<u8> for CommandId {
         }
     }
 }
-
-/// Common trait for all command messages
-pub trait Command {
-    fn command_id(&self) -> CommandId;
-}
-
 /// Upload Chunk Command (0x02)
 /// Used to upload chunks of a large message
 #[derive(Debug, Format)]
@@ -47,12 +41,6 @@ pub struct UploadIsotpChunkCommand {
     pub offset: u16,
     pub chunk_length: u16,
     pub chunk: heapless::Vec<u8, 512>,
-}
-
-impl Command for UploadIsotpChunkCommand {
-    fn command_id(&self) -> CommandId {
-        CommandId::UploadIsotpChunk
-    }
 }
 
 impl UploadIsotpChunkCommand {
@@ -90,12 +78,6 @@ pub struct SendIsotpBufferCommand {
     pub total_length: u16,
 }
 
-impl Command for SendIsotpBufferCommand {
-    fn command_id(&self) -> CommandId {
-        CommandId::SendIsotpBuffer
-    }
-}
-
 impl SendIsotpBufferCommand {
     /// Parse a trigger BLE send command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
@@ -123,12 +105,6 @@ pub struct StartPeriodicIsotpMessageCommand {
     pub reply_arbitration_id: u32,
     pub message_count: u16,
     pub message_data: heapless::Vec<u8, 512>,
-}
-
-impl Command for StartPeriodicIsotpMessageCommand {
-    fn command_id(&self) -> CommandId {
-        CommandId::StartPeriodicIsotpMessage
-    }
 }
 
 #[allow(dead_code)]
@@ -217,12 +193,6 @@ pub struct StopPeriodicIsotpMessageCommand {
     pub reply_arbitration_id: u32,
 }
 
-impl Command for StopPeriodicIsotpMessageCommand {
-    fn command_id(&self) -> CommandId {
-        CommandId::StopPeriodicIsotpMessage
-    }
-}
-
 impl StopPeriodicIsotpMessageCommand {
     /// Parse a stop periodic message command from a byte buffer
     pub fn parse(buffer: &[u8]) -> Result<Self, ParseError> {
@@ -256,12 +226,6 @@ pub struct ConfigureIsotpFilterCommand {
     pub reply_arbitration_id: u32,
     // Filter name (null-terminated string)
     pub name: heapless::Vec<u8, 32>,
-}
-
-impl Command for ConfigureIsotpFilterCommand {
-    fn command_id(&self) -> CommandId {
-        CommandId::ConfigureIsotpFilter
-    }
 }
 
 impl ConfigureIsotpFilterCommand {

@@ -11,11 +11,11 @@ mod led;
 
 use bt_hci::controller::ExternalController;
 use cyw43::bluetooth::BtDriver;
-use cyw43_pio::{PioSpi, DEFAULT_CLOCK_DIVIDER, RM2_CLOCK_DIVIDER};
-use defmt::{info, unwrap};
+use cyw43_pio::PioSpi;
+use defmt::unwrap;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
-use embassy_rp::gpio::{Input, Level, Output, Pull};
+use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::{DMA_CH0, PIO0, UART1};
 use embassy_rp::pio::{self, Pio};
 use embassy_rp::uart::{self};

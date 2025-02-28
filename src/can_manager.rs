@@ -182,7 +182,7 @@ pub fn init_can(pio_num: u32, gpio_rx: u32, gpio_tx: u32, sys_clock: u32, bitrat
     use embassy_rp::interrupt::Priority;
 
     unsafe { cortex_m::peripheral::NVIC::unmask(embassy_rp::interrupt::PIO2_IRQ_0) };
-    embassy_rp::interrupt::PIO2_IRQ_0.set_priority(Priority::P1);
+    embassy_rp::interrupt::PIO2_IRQ_0.set_priority(Priority::P2);
 
     // Create CAN instance in static storage to ensure it lives for the program duration
     static mut CAN: Option<can2040_rs::Can2040> = None;
