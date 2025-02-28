@@ -1,11 +1,11 @@
 #![no_std]
 #![no_main]
 
-mod ble_isotp_bridge;
 mod ble_protocol;
 mod ble_server;
 mod can_manager;
 mod channels;
+mod isotp_ble_bridge;
 mod isotp_handler;
 mod led;
 
@@ -119,8 +119,8 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(can_manager::can_rx_channel_task()));
 
     // init ble isotp bridge
-    unwrap!(spawner.spawn(ble_isotp_bridge::ble_isotp_bridge_ble_rx_task()));
-    unwrap!(spawner.spawn(ble_isotp_bridge::ble_isotp_bridge_can_rx_task()));
+    unwrap!(spawner.spawn(isotp_ble_bridge::isotp_ble_bridge_ble_rx_task()));
+    unwrap!(spawner.spawn(isotp_ble_bridge::isotp_ble_bridge_can_rx_task()));
 
     // tasks will run in background
 }

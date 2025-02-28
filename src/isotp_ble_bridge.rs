@@ -7,8 +7,8 @@ use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 
 // Create a static shared manager
-static BLE_ISOTP_BRIDGE: Mutex<ThreadModeRawMutex, BleIsotpBridge> =
-    Mutex::new(BleIsotpBridge::new());
+static ISOTP_BLE_BRIDGE: Mutex<ThreadModeRawMutex, IsotpBleBridge> =
+    Mutex::new(IsotpBleBridge::new());
 
 /// Error type for message parsing
 #[derive(Debug, Format)]
@@ -23,12 +23,12 @@ pub enum ManagerError {
 const MAX_HANDLERS: usize = 4;
 const MAX_TX_BUFFER_SIZE: usize = 4096;
 
-pub struct BleIsotpBridge {
+pub struct IsotpBleBridge {
     isotp_handlers: heapless::FnvIndexMap<u32, IsotpHandler, MAX_HANDLERS>,
     isotp_tx_buffer: heapless::Vec<u8, MAX_TX_BUFFER_SIZE>,
 }
 
-impl BleIsotpBridge {
+impl IsotpBleBridge {
     pub const fn new() -> Self {
         Self {
             isotp_handlers: heapless::FnvIndexMap::<u32, IsotpHandler, MAX_HANDLERS>::new(),
@@ -165,14 +165,14 @@ impl BleIsotpBridge {
 }
 
 #[embassy_executor::task]
-pub async fn ble_isotp_bridge_can_rx_task() {
+pub async fn isotp_ble_bridge_can_rx_task() {
     info!("BLE IsoTP bridge CAN task started");
 
     loop {
         let can_message = ISOTP_CAN_CHANNEL.receive().await;
 
         // Brief critical section
-        BLE_ISOTP_BRIDGE
+        ISOTP_BLE_BRIDGE
             .lock()
             .await
             .handle_can_frame(can_message.id, &can_message.data)
@@ -184,14 +184,14 @@ pub async fn ble_isotp_bridge_can_rx_task() {
 }
 
 #[embassy_executor::task]
-pub async fn ble_isotp_bridge_ble_rx_task() {
+pub async fn isotp_ble_bridge_ble_rx_task() {
     info!("BLE IsoTP bridge BLE task started");
 
     loop {
         let parsed_message = ISOTP_BLE_CHANNEL.receive().await;
 
         // Brief critical section
-        match BLE_ISOTP_BRIDGE
+        match ISOTP_BLE_BRIDGE
             .lock()
             .await
             .handle_ble_message(&parsed_message)

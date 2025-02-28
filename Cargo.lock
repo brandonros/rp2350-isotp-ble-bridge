@@ -1318,7 +1318,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rp2350-ble"
+name = "rp2350-isotp-ble-bridge"
 version = "0.1.0"
 dependencies = [
  "bt-hci",

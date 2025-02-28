@@ -27,6 +27,8 @@ const OVERFLOW: u8 = 0x02;
 const DEFAULT_ST_MIN: u8 = 0x0A; // 10ms
 const DEFAULT_BLOCK_SIZE: u8 = 0x00; // Send all frames
 
+const DEFAULT_TX_PAD_BYTE: u8 = 0x55;
+
 pub struct IsotpHandler {
     pub request_arbitration_id: u32,
     pub reply_arbitration_id: u32,
@@ -81,7 +83,7 @@ impl IsotpHandler {
 
     fn pad_frame(frame: &mut Vec<u8, 8>) {
         while frame.len() < 8 {
-            frame.extend_from_slice(&[0x00]).unwrap();
+            frame.extend_from_slice(&[DEFAULT_TX_PAD_BYTE]).unwrap();
         }
     }
 

@@ -3,9 +3,9 @@ use embassy_futures::{join::join, select::select};
 use trouble_host::prelude::*;
 
 use crate::{
-    ble_isotp_bridge,
     ble_protocol::{self, IsoTpMessage},
     channels::BLE_RESPONSE_CHANNEL,
+    isotp_ble_bridge,
 };
 
 /// Device name
@@ -191,7 +191,7 @@ async fn incoming_gatt_events_task(
 
                                     match ble_protocol::BleMessageParser::parse(event_data) {
                                         Ok(parsed) => {
-                                            ble_isotp_bridge::handle_ble_message(parsed).await;
+                                            isotp_ble_bridge::handle_ble_message(parsed).await;
                                         }
                                         Err(e) => {
                                             warn!("[gatt] Parse error: {:?}", e);

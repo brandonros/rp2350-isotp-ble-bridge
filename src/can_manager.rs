@@ -4,7 +4,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use portable_atomic::{AtomicPtr, Ordering};
 
-use crate::channels::CAN_CHANNEL;
+use crate::{channels::CAN_CHANNEL, isotp_ble_bridge};
 
 #[derive(Debug)]
 pub struct CanMessage {
@@ -60,6 +60,7 @@ extern "C" fn can_callback(
 
         // drop message if it does not match our filters
         if !found {
+            debug!("dropping message {:x} {:02x}", msg.id, msg.dlc);
             return;
         }
 
@@ -180,11 +181,9 @@ pub fn init_can(pio_num: u32, gpio_rx: u32, gpio_tx: u32, sys_clock: u32, bitrat
 // New task to process the ring buffer
 #[embassy_executor::task]
 pub async fn can_rx_channel_task() {
-    use crate::ble_isotp_bridge;
-
     loop {
         let message = CAN_RX_QUEUE.receive().await;
-        ble_isotp_bridge::handle_can_message(message).await;
+        isotp_ble_bridge::handle_can_message(message).await;
     }
 }
 
