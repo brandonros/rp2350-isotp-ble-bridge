@@ -12,6 +12,7 @@ embassy-executor = { version = "*", features = ["task-arena-size-98304", "arch-c
 embassy-time = { version = "*", features = ["defmt", "defmt-timestamp-uptime"] }
 # platform
 embassy-rp = { version = "*", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp235xa", "binary-info"] }
+cortex-m = "0.7.6"
 cortex-m-rt = "0.7.0"
 cyw43 = { version = "*", features = ["defmt", "firmware-logs", "bluetooth"] }
 cyw43-pio = { version = "*", features = ["defmt"] }

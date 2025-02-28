@@ -10,6 +10,7 @@ use defmt::{debug, error, info, unwrap};
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Level, Output};
+use embassy_rp::interrupt::{InterruptExt as _, Priority};
 use embassy_rp::peripherals::{DMA_CH0, PIO0, UART1};
 use embassy_rp::pio::{self, Pio};
 use embassy_rp::uart::{self};
@@ -33,11 +34,11 @@ static CAN_INSTANCE: AtomicPtr<can2040_rs::Can2040> = AtomicPtr::new(core::ptr::
 // interrupt handlers
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
-    PIO1_IRQ_0 => CanInterruptHandler;
+    PIO2_IRQ_0 => CanInterruptHandler;
 });
 
 struct CanInterruptHandler;
-impl embassy_rp::interrupt::typelevel::Handler<embassy_rp::interrupt::typelevel::PIO1_IRQ_0>
+impl embassy_rp::interrupt::typelevel::Handler<embassy_rp::interrupt::typelevel::PIO2_IRQ_0>
     for CanInterruptHandler
 {
     unsafe fn on_interrupt() {
@@ -60,9 +61,9 @@ async fn cyw43_task(
 #[embassy_executor::task]
 async fn blinky_task(control: &'static mut cyw43::Control<'static>) {
     loop {
-        control.gpio_set(0, true).await;
+        //control.gpio_set(0, true).await;
         Timer::after(Duration::from_millis(1000)).await;
-        control.gpio_set(0, false).await;
+        //control.gpio_set(0, false).await;
         Timer::after(Duration::from_millis(1000)).await;
     }
 }
@@ -80,25 +81,33 @@ async fn can_task() {
             let mut msg = can2040_rs::can2040_msg::default();
             msg.id = 0x7e5; // Standard ID
             msg.dlc = 8; // 8 bytes of data
-            msg.__bindgen_anon_1.data = [0x02, 0x3e, 0x00, 0x55, 0x55, 0x55, 0x55, 0x55];
-
+            unsafe {
+                msg.__bindgen_anon_1.data[0] = 0x02;
+                msg.__bindgen_anon_1.data[1] = 0x3e;
+                msg.__bindgen_anon_1.data[2] = 0x00;
+                msg.__bindgen_anon_1.data[3] = 0x55;
+                msg.__bindgen_anon_1.data[4] = 0x55;
+                msg.__bindgen_anon_1.data[5] = 0x55;
+                msg.__bindgen_anon_1.data[6] = 0x55;
+                msg.__bindgen_anon_1.data[7] = 0x55;
+            }
             let tx_avail = unsafe { (*can_ptr).check_transmit() };
             if tx_avail > 0 {
                 info!("sending CAN message");
-                match unsafe { (*can_ptr).transmit(&msg) } {
+                match unsafe { (*can_ptr).transmit(&mut msg) } {
                     Ok(_) => info!("CAN message sent"),
                     Err(e) => error!("Failed to send CAN message: {}", e),
                 }
-
-                // Get statistics to help with debugging
-                let stats = unsafe { (*can_ptr).get_statistics() };
-                info!(
-                    "CAN stats - TX attempts: {}, TX successful: {}, RX: {}, Parse errors: {}",
-                    stats.tx_attempt, stats.tx_total, stats.rx_total, stats.parse_error
-                );
             } else {
                 debug!("can.check_transmit = {} (≤ 0)", tx_avail);
             }
+
+            // Get statistics to help with debugging
+            let stats = unsafe { (*can_ptr).get_statistics() };
+            info!(
+                "CAN stats - TX attempts: {}, TX successful: {}, RX: {}, Parse errors: {}",
+                stats.tx_attempt, stats.tx_total, stats.rx_total, stats.parse_error
+            );
         } else {
             debug!("CAN instance not yet initialized");
         }
@@ -126,8 +135,12 @@ extern "C" fn can_callback(
         // Safety: msg is valid when notification is RX
         let msg = unsafe { &*msg };
         info!("ID: {}, DLC: {}", msg.id, msg.dlc);
+    } else if notify == can2040_rs::notify::TX {
+        info!("CAN message sent");
+    } else if notify == can2040_rs::notify::ERROR {
+        info!("CAN error");
     } else {
-        debug!("can_callback: notify != RX");
+        debug!("can_callback: unknown notify: {}", notify);
     }
 }
 
@@ -173,21 +186,28 @@ async fn main(spawner: Spawner) {
     control.init(clm).await;
 
     // init can task
-    let resets = embassy_rp::pac::RESETS;
+    /*let resets = embassy_rp::pac::RESETS;
     resets.reset().modify(|r| r.set_pio1(false)); // Remove from reset
     while !resets.reset_done().read().pio1() {
         // Wait for reset to complete
         core::hint::spin_loop();
-    }
+    }*/
+    unsafe { cortex_m::peripheral::NVIC::unmask(embassy_rp::interrupt::PIO2_IRQ_0) };
+    embassy_rp::interrupt::PIO2_IRQ_0.set_priority(Priority::P1);
 
-    let mut can = can2040_rs::Can2040::new(1); // Use PIO1
+    let pio_num = 2;
+    let mut can = can2040_rs::Can2040::new(pio_num);
     can.setup();
     can.set_callback(Some(can_callback));
 
     let can_ptr = &mut can as *mut _;
     CAN_INSTANCE.store(can_ptr, Ordering::Release);
 
-    can.start(125_000_000, 500_000, 10, 11);
+    let gpio_rx = 10; // goes to transceiver rx, do not flip
+    let gpio_tx = 11; // goes to transceiver tx, do not flip
+    let sys_clock = embassy_rp::clocks::clk_sys_freq();
+    info!("sys_clock: {}", sys_clock);
+    can.start(sys_clock, 500_000, gpio_rx, gpio_tx);
     unwrap!(spawner.spawn(can_task()));
 
     // init blinky task
