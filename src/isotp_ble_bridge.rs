@@ -118,9 +118,14 @@ impl IsotpBleBridge {
                     .send_isotp_message(request_arbitration_id, msg)
                     .await
                 {
-                    true => Ok(()),
-                    false => Err(ManagerError::FailedToSendMessage),
+                    true => (),
+                    false => return Err(ManagerError::FailedToSendMessage),
                 }
+
+                // flush tx buffer
+                self.isotp_tx_buffer.clear();
+
+                Ok(())
             }
             ParsedBleMessage::StartPeriodicIsotpMessage(_start_periodic_message_command) => {
                 todo!()

@@ -114,7 +114,7 @@ async fn main(spawner: Spawner) {
     Timer::after(Duration::from_millis(250)).await;
 
     // init can bus
-    let sys_clock = embassy_rp::clocks::clk_sys_freq();
+    let sys_clock = embassy_rp::clocks::clk_sys_freq(); // 150_000_000
     can_manager::init_can(
         2,         // pio_num
         10,        // gpio_rx

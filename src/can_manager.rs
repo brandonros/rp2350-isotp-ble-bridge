@@ -1,4 +1,4 @@
-use defmt::{debug, error, info};
+use defmt::{debug, error, info, Format};
 use embassy_rp::interrupt;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -7,7 +7,7 @@ use portable_atomic::{AtomicPtr, Ordering};
 
 use crate::{channels::CAN_CHANNEL, isotp_ble_bridge};
 
-#[derive(Debug)]
+#[derive(Debug, Format)]
 pub struct CanMessage {
     pub id: u32,
     pub data: heapless::Vec<u8, 8>,
@@ -31,8 +31,7 @@ const RING_BUFFER_SIZE: usize = 32;
 static CAN_RX_QUEUE: Channel<CriticalSectionRawMutex, CanMessage, RING_BUFFER_SIZE> =
     Channel::new();
 
-// For 4-6 IDs, we can just use a small fixed array
-const MAX_FILTERS: usize = 8; // Round up to next power of 2 for good measure
+const MAX_FILTERS: usize = 8;
 static mut FILTER_IDS: [u32; MAX_FILTERS] = [0; MAX_FILTERS];
 static mut FILTER_COUNT: u8 = 0;
 
@@ -43,18 +42,17 @@ extern "C" fn can_callback(
     msg: *mut can2040_rs::can2040_msg,
 ) {
     if notify == can2040_rs::notify::RX {
-        info!("[can] CAN message received");
-
         // Safety: msg is valid when notification is RX
+        if msg.is_null() {
+            error!("[can] CAN message is null");
+            return;
+        }
         let msg = unsafe { &*msg };
 
-        // Safety: We're only reading these values, and they're only modified during init
-        let count = unsafe { FILTER_COUNT };
-
-        // Direct comparison against our small set of IDs
+        // check if message matches any of our filters
+        let filter_count = unsafe { FILTER_COUNT };
         let mut found = false;
-        for i in 0..count as usize {
-            // Safety: We're only reading the value, and it's only modified during init
+        for i in 0..filter_count as usize {
             if msg.id == unsafe { FILTER_IDS[i] } {
                 found = true;
                 break;
@@ -63,23 +61,36 @@ extern "C" fn can_callback(
 
         // drop message if it does not match our filters
         if !found {
-            debug!("dropping message {:x} {:02x}", msg.id, msg.dlc);
             return;
         }
 
-        // Rest of the handler...
-        let mut data = heapless::Vec::new();
+        // log
         let frame_data = unsafe { msg.__bindgen_anon_1.data };
+        info!(
+            "[can] CAN message received id = {:x} dlc = {:x} data = {:02x}",
+            msg.id, msg.dlc, frame_data
+        );
+
+        // send message to isotp_ble_bridge
+        let mut data = heapless::Vec::new();
         if data
             .extend_from_slice(&frame_data[..(msg.dlc as usize)])
             .is_ok()
         {
-            let _ = CAN_RX_QUEUE.try_send(CanMessage { id: msg.id, data });
+            match CAN_RX_QUEUE.try_send(CanMessage { id: msg.id, data }) {
+                Ok(_) => (),
+                Err(e) => error!(
+                    "[can] Failed to send CAN message to isotp_ble_bridge: {}",
+                    e
+                ),
+            }
         }
     } else if notify == can2040_rs::notify::TX {
         info!("[can] CAN message sent");
-    } else if notify == can2040_rs::notify::ERROR {
-        info!("[can] CAN error");
+    } else if notify & can2040_rs::notify::ERROR != 0 {
+        // Extract error code by masking out the ERROR notification bit
+        let error_code = notify & !can2040_rs::notify::ERROR;
+        info!("[can] CAN error: code={:#x}", error_code);
     } else {
         debug!("[can] can_callback: unknown notify: {}", notify);
     }

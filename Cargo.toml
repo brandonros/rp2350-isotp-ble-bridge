@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 # embassy
 embassy-futures = "0.1.1"
-embassy-sync = "0.6.2"
+embassy-sync = { version = "0.6.2", features = ["defmt"] }
 embassy-executor = { version = "*", features = ["task-arena-size-98304", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
 embassy-time = { version = "*", features = ["defmt", "defmt-timestamp-uptime"] }
 # platform

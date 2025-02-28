@@ -129,14 +129,16 @@ async fn outgoing_gatt_events_task(
         // Serialize the message into a single buffer
         let mut response_data = heapless::Vec::<u8, 512>::new();
 
-        // Write request_arbitration_id (4 bytes)
-        response_data
-            .extend_from_slice(&message.request_arbitration_id.to_be_bytes())
-            .unwrap();
         // Write reply_arbitration_id (4 bytes)
         response_data
             .extend_from_slice(&message.reply_arbitration_id.to_be_bytes())
             .unwrap();
+
+        // Write request_arbitration_id (4 bytes)
+        response_data
+            .extend_from_slice(&message.request_arbitration_id.to_be_bytes())
+            .unwrap();
+
         // Write the actual data
         response_data.extend_from_slice(&message.pdu).unwrap();
 
