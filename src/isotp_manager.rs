@@ -1,5 +1,6 @@
 use crate::ble_server;
 use crate::can_manager::CanMessage;
+use crate::channels::{ISOTP_BLE_CHANNEL, ISOTP_CAN_CHANNEL};
 use crate::isotp_handler::IsotpHandler;
 use crate::{ble_protocol::*, can_manager};
 use defmt::{error, info, Format};
@@ -9,10 +10,6 @@ use embassy_sync::mutex::Mutex;
 
 // Create a static shared manager
 static ISOTP_MANAGER: Mutex<ThreadModeRawMutex, IsoTpManager> = Mutex::new(IsoTpManager::new());
-
-// Channel for communicating with the IsoTP task
-pub static ISOTP_BLE_CHANNEL: Channel<ThreadModeRawMutex, ParsedBleMessage, 16> = Channel::new();
-pub static ISOTP_CAN_CHANNEL: Channel<ThreadModeRawMutex, CanMessage, 16> = Channel::new();
 
 /// Error type for message parsing
 #[derive(Debug, Format)]

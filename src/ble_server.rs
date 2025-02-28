@@ -4,7 +4,7 @@ use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::channel::Channel;
 use trouble_host::prelude::*;
 
-use crate::{ble_protocol, isotp_manager};
+use crate::{ble_protocol, channels::BLE_RESPONSE_CHANNEL, isotp_manager};
 
 /// Device name
 const DEVICE_NAME: &str = "BLE_TO_ISOTP";
@@ -47,10 +47,6 @@ struct SppService {
     // server sends data to the client
     response: heapless::Vec<u8, MAX_RESPONSE_SIZE>,
 }
-
-// Update the channel to use the new struct
-pub static BLE_RESPONSE_CHANNEL: Channel<ThreadModeRawMutex, IsotpMessageReceived, 16> =
-    Channel::new();
 
 /// Run the BLE stack.
 pub async fn run<C, const L2CAP_MTU: usize>(controller: C)

@@ -4,6 +4,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use portable_atomic::{AtomicPtr, Ordering};
 
+use crate::channels::CAN_CHANNEL;
+
 #[derive(Debug)]
 pub struct CanMessage {
     pub id: u32,
@@ -16,9 +18,6 @@ pub enum CanChannelMessage {
     Send(CanMessage),
     // Add other message types as needed
 }
-
-// Channel for communicating with the CAN task
-pub static CAN_CHANNEL: Channel<CriticalSectionRawMutex, CanChannelMessage, 16> = Channel::new();
 
 static CAN_INSTANCE: AtomicPtr<can2040_rs::Can2040> = AtomicPtr::new(core::ptr::null_mut());
 
@@ -96,40 +95,38 @@ pub async fn can_channel_task() {
 
     loop {
         // Wait for the next message
-        match CAN_CHANNEL.receive().await {
-            CanChannelMessage::Send(can_message) => {
-                // Load the pointer once
-                let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
+        let can_message = CAN_CHANNEL.receive().await;
 
-                if can_ptr.is_null() {
-                    error!("CAN instance not initialized");
-                    continue;
-                }
+        // Load the pointer once
+        let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
 
-                // build message
-                let mut msg = can2040_rs::can2040_msg::default();
-                msg.id = can_message.id;
-                msg.dlc = can_message.data.len() as u32;
-                for (i, &byte) in can_message.data.iter().enumerate() {
-                    unsafe {
-                        msg.__bindgen_anon_1.data[i] = byte;
-                    }
-                }
+        if can_ptr.is_null() {
+            error!("CAN instance not initialized");
+            continue;
+        }
 
-                // check if we can transmit
-                let tx_avail = unsafe { (*can_ptr).check_transmit() };
-                if tx_avail <= 0 {
-                    error!("CAN tx buffer is full");
-                    continue;
-                }
-
-                // send
-                info!("sending CAN message");
-                match unsafe { (*can_ptr).transmit(&mut msg) } {
-                    Ok(_) => debug!("CAN message sent successfully"),
-                    Err(e) => error!("Failed to send CAN message: {}", e),
-                }
+        // build message
+        let mut msg = can2040_rs::can2040_msg::default();
+        msg.id = can_message.id;
+        msg.dlc = can_message.data.len() as u32;
+        for (i, &byte) in can_message.data.iter().enumerate() {
+            unsafe {
+                msg.__bindgen_anon_1.data[i] = byte;
             }
+        }
+
+        // check if we can transmit
+        let tx_avail = unsafe { (*can_ptr).check_transmit() };
+        if tx_avail <= 0 {
+            error!("CAN tx buffer is full");
+            continue;
+        }
+
+        // send
+        info!("sending CAN message");
+        match unsafe { (*can_ptr).transmit(&mut msg) } {
+            Ok(_) => debug!("CAN message sent successfully"),
+            Err(e) => error!("Failed to send CAN message: {}", e),
         }
     }
 }
@@ -140,9 +137,7 @@ pub async fn send_message(id: u32, data: &[u8]) -> bool {
     match vec.extend_from_slice(data) {
         Ok(_) => {
             // Send message to CAN task
-            CAN_CHANNEL
-                .send(CanChannelMessage::Send(CanMessage { id, data: vec }))
-                .await;
+            CAN_CHANNEL.send(CanMessage { id, data: vec }).await;
             true
         }
         Err(_) => {

@@ -4,6 +4,7 @@
 mod ble_protocol;
 mod ble_server;
 mod can_manager;
+mod channels;
 mod isotp_handler;
 mod isotp_manager;
 
@@ -45,6 +46,13 @@ async fn cyw43_task(
     runner.run().await
 }
 
+// ble task
+#[embassy_executor::task]
+async fn ble_task(bt_device: BtDriver<'static>) {
+    let controller: ExternalController<BtDriver<'static>, 10> = ExternalController::new(bt_device);
+    ble_server::run::<_, 128>(controller).await;
+}
+
 // blinky task
 #[embassy_executor::task]
 async fn blinky_task(_control: &'static mut cyw43::Control<'static>) {
@@ -55,13 +63,6 @@ async fn blinky_task(_control: &'static mut cyw43::Control<'static>) {
         //control.gpio_set(0, false).await;
         Timer::after(Duration::from_millis(1000)).await;
     }
-}
-
-// ble task
-#[embassy_executor::task]
-async fn ble_task(bt_device: BtDriver<'static>) {
-    let controller: ExternalController<BtDriver<'static>, 10> = ExternalController::new(bt_device);
-    ble_server::run::<_, 128>(controller).await;
 }
 
 #[embassy_executor::main]
