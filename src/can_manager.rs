@@ -2,6 +2,7 @@ use defmt::{debug, error, info, Format};
 use embassy_rp::interrupt;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
 use portable_atomic::{AtomicPtr, Ordering};
 
@@ -34,6 +35,9 @@ static CAN_RX_QUEUE: Channel<CriticalSectionRawMutex, CanMessage, RING_BUFFER_SI
 const MAX_FILTERS: usize = 8;
 static mut FILTER_IDS: [u32; MAX_FILTERS] = [0; MAX_FILTERS];
 static mut FILTER_COUNT: u8 = 0;
+
+// Add this near the other static declarations
+static RESET_REQUESTED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 // Modified callback with direct comparison
 extern "C" fn can_callback(
@@ -90,7 +94,9 @@ extern "C" fn can_callback(
     } else if notify & can2040_rs::notify::ERROR != 0 {
         // Extract error code by masking out the ERROR notification bit
         let error_code = notify & !can2040_rs::notify::ERROR;
-        info!("[can] CAN error: code={:#x}", error_code);
+        error!("[can] CAN error: code={:#x}", error_code);
+        // Signal that a reset is needed
+        RESET_REQUESTED.signal(());
     } else {
         debug!("[can] can_callback: unknown notify: {}", notify);
     }
@@ -177,7 +183,12 @@ pub fn get_statistics() -> Option<can2040_rs::can2040_stats> {
     }
 }
 
-pub fn init_can(pio_num: u32, gpio_rx: u32, gpio_tx: u32, sys_clock: u32, bitrate: u32) {
+const PIO_NUM: u32 = 2;
+const BITRATE: u32 = 500_000;
+const GPIO_RX: u32 = 10;
+const GPIO_TX: u32 = 11;
+
+pub fn init_can() {
     use embassy_rp::interrupt::InterruptExt;
     use embassy_rp::interrupt::Priority;
 
@@ -189,7 +200,7 @@ pub fn init_can(pio_num: u32, gpio_rx: u32, gpio_tx: u32, sys_clock: u32, bitrat
 
     // Safety: This is only called once during initialization
     let can = unsafe {
-        CAN = Some(can2040_rs::Can2040::new(pio_num));
+        CAN = Some(can2040_rs::Can2040::new(PIO_NUM));
         CAN.as_mut().unwrap()
     };
 
@@ -197,7 +208,9 @@ pub fn init_can(pio_num: u32, gpio_rx: u32, gpio_tx: u32, sys_clock: u32, bitrat
     can.set_callback(Some(can_callback));
     let can_ptr = can as *mut _;
     init_instance(can_ptr);
-    can.start(sys_clock, bitrate, gpio_rx, gpio_tx);
+
+    let sys_clock = embassy_rp::clocks::clk_sys_freq(); // 150_000_000
+    can.start(sys_clock, BITRATE, GPIO_RX, GPIO_TX);
 }
 
 #[embassy_executor::task]
@@ -235,4 +248,21 @@ pub fn register_isotp_filter(response_id: u32) -> bool {
         }
         true
     })
+}
+
+// Add new task to handle CAN reset requests
+#[embassy_executor::task]
+pub async fn can_reset_task() {
+    loop {
+        // Wait for reset signal
+        RESET_REQUESTED.wait().await;
+        error!("[can] Reset requested due to CAN error");
+
+        let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
+        if !can_ptr.is_null() {
+            unsafe { (*can_ptr).stop() };
+            let sys_clock = embassy_rp::clocks::clk_sys_freq(); // 150_000_000
+            unsafe { (*can_ptr).start(sys_clock, BITRATE, GPIO_RX, GPIO_TX) };
+        }
+    }
 }

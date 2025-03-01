@@ -114,14 +114,8 @@ async fn main(spawner: Spawner) {
     Timer::after(Duration::from_millis(250)).await;
 
     // init can bus
-    let sys_clock = embassy_rp::clocks::clk_sys_freq(); // 150_000_000
-    can_manager::init_can(
-        2,         // pio_num
-        10,        // gpio_rx
-        11,        // gpio_tx
-        sys_clock, // sys_clock
-        500_000,   // bitrate
-    );
+
+    can_manager::init_can();
 
     // sleep to allow can to settle
     Timer::after(Duration::from_millis(250)).await;
@@ -129,6 +123,7 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(can_manager::can_tx_channel_task()));
     unwrap!(spawner.spawn(can_manager::can_rx_channel_task()));
     unwrap!(spawner.spawn(can_manager::can_stats_task()));
+    unwrap!(spawner.spawn(can_manager::can_reset_task()));
 
     // init ble isotp bridge
     unwrap!(spawner.spawn(isotp_ble_bridge::isotp_ble_bridge_ble_rx_task()));
