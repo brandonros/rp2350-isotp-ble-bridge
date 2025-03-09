@@ -14,6 +14,13 @@ pub struct CanMessage {
     pub data: heapless::Vec<u8, 8>,
 }
 
+#[derive(Debug, Format)]
+struct RawCanMessage {
+    id: u32,
+    dlc: u32,
+    data: [u8; 8],
+}
+
 static CAN_INSTANCE: AtomicPtr<can2040_rs::Can2040> = AtomicPtr::new(core::ptr::null_mut());
 
 pub struct CanInterruptHandler;
@@ -29,7 +36,7 @@ impl interrupt::typelevel::Handler<interrupt::typelevel::PIO2_IRQ_0> for CanInte
 
 // Fixed-size ring buffer for incoming CAN messages
 const RING_BUFFER_SIZE: usize = 32;
-static CAN_RX_QUEUE: Channel<CriticalSectionRawMutex, CanMessage, RING_BUFFER_SIZE> =
+static RAW_CAN_RX_QUEUE: Channel<CriticalSectionRawMutex, RawCanMessage, RING_BUFFER_SIZE> =
     Channel::new();
 
 const MAX_FILTERS: usize = 8;
@@ -39,66 +46,33 @@ static mut FILTER_COUNT: u8 = 0;
 // Add this near the other static declarations
 static RESET_REQUESTED: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
-// Modified callback with direct comparison
+// Simplified callback that only queues messages
 extern "C" fn can_callback(
     _cd: *mut can2040_rs::can2040,
     notify: u32,
     msg: *mut can2040_rs::can2040_msg,
 ) {
     if notify == can2040_rs::notify::RX {
-        // Safety: msg is valid when notification is RX
         if msg.is_null() {
-            error!("[can] CAN message is null");
             return;
         }
+
+        // Safety: msg is valid when notification is RX
         let msg = unsafe { &*msg };
-
-        // check if message matches any of our filters
-        let filter_count = unsafe { FILTER_COUNT };
-        let mut found = false;
-        for i in 0..filter_count as usize {
-            if msg.id == unsafe { FILTER_IDS[i] } {
-                found = true;
-                break;
-            }
-        }
-
-        // drop message if it does not match our filters
-        if !found {
-            return;
-        }
-
-        // log
         let frame_data = unsafe { msg.__bindgen_anon_1.data };
-        info!(
-            "[can] CAN message received id = {:x} dlc = {:x} data = {:02x}",
-            msg.id, msg.dlc, frame_data
-        );
 
-        // send message to isotp_ble_bridge
-        let mut data = heapless::Vec::new();
-        if data
-            .extend_from_slice(&frame_data[..(msg.dlc as usize)])
-            .is_ok()
-        {
-            match CAN_RX_QUEUE.try_send(CanMessage { id: msg.id, data }) {
-                Ok(_) => (),
-                Err(e) => error!(
-                    "[can] Failed to send CAN message to isotp_ble_bridge: {}",
-                    e
-                ),
-            }
-        }
-    } else if notify == can2040_rs::notify::TX {
-        info!("[can] CAN message sent");
+        // Queue raw message without any processing
+        let raw_msg = RawCanMessage {
+            id: msg.id,
+            dlc: msg.dlc,
+            data: frame_data,
+        };
+
+        let _ = RAW_CAN_RX_QUEUE.try_send(raw_msg);
     } else if notify & can2040_rs::notify::ERROR != 0 {
-        // Extract error code by masking out the ERROR notification bit
-        let error_code = notify & !can2040_rs::notify::ERROR;
-        error!("[can] CAN error: code={:#x}", error_code);
-        // Signal that a reset is needed
         RESET_REQUESTED.signal(());
-    } else {
-        debug!("[can] can_callback: unknown notify: {}", notify);
+    } else if notify & can2040_rs::notify::TX != 0 {
+        // TODO: do something?
     }
 }
 
@@ -225,12 +199,44 @@ pub async fn can_stats_task() {
     }
 }
 
-// New task to process the ring buffer
+// Add new task to process raw CAN messages
 #[embassy_executor::task]
-pub async fn can_rx_channel_task() {
+pub async fn can_rx_processor_task() {
     loop {
-        let message = CAN_RX_QUEUE.receive().await;
-        isotp_ble_bridge::handle_can_message(message).await;
+        let raw_msg = RAW_CAN_RX_QUEUE.receive().await;
+
+        // Filter check
+        let filter_count = unsafe { FILTER_COUNT };
+        let mut found = false;
+        for i in 0..filter_count as usize {
+            if raw_msg.id == unsafe { FILTER_IDS[i] } {
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            continue;
+        }
+
+        // Logging
+        info!(
+            "[can] CAN message received id = {:x} dlc = {:x} data = {:02x}",
+            raw_msg.id, raw_msg.dlc, raw_msg.data
+        );
+
+        // Process message
+        let mut data = heapless::Vec::new();
+        if data
+            .extend_from_slice(&raw_msg.data[..(raw_msg.dlc as usize)])
+            .is_ok()
+        {
+            isotp_ble_bridge::handle_can_message(CanMessage {
+                id: raw_msg.id,
+                data,
+            })
+            .await;
+        }
     }
 }
 
@@ -261,6 +267,9 @@ pub async fn can_reset_task() {
         let can_ptr = CAN_INSTANCE.load(Ordering::Acquire);
         if !can_ptr.is_null() {
             unsafe { (*can_ptr).stop() };
+
+            unsafe { (*can_ptr).setup() };
+            unsafe { (*can_ptr).set_callback(Some(can_callback)) };
             let sys_clock = embassy_rp::clocks::clk_sys_freq(); // 150_000_000
             unsafe { (*can_ptr).start(sys_clock, BITRATE, GPIO_RX, GPIO_TX) };
         }

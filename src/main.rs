@@ -121,7 +121,7 @@ async fn main(spawner: Spawner) {
     Timer::after(Duration::from_millis(250)).await;
 
     unwrap!(spawner.spawn(can_manager::can_tx_channel_task()));
-    unwrap!(spawner.spawn(can_manager::can_rx_channel_task()));
+    unwrap!(spawner.spawn(can_manager::can_rx_processor_task()));
     unwrap!(spawner.spawn(can_manager::can_stats_task()));
     unwrap!(spawner.spawn(can_manager::can_reset_task()));
 
